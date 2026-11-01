@@ -1,0 +1,4 @@
+# Life Grid bundle patch: one Host row; the page itself is the Client half.
+- insert:
+    - id: life-grid
+      name: '@local/life-grid'

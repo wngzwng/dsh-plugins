@@ -1,0 +1,4 @@
+# Pomodoro Clock bundle patch: one Host row; the timer itself is the Client half.
+- insert:
+    - id: pomodoro-clock
+      name: '@local/pomodoro-clock'

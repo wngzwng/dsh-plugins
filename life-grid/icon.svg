@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Life Grid">
+  <rect x="6" y="6" width="16" height="16" rx="4" fill="none" stroke="#2f6f6a" stroke-width="3"/>
+  <rect x="24" y="6" width="16" height="16" rx="4" fill="none" stroke="#2f6f6a" stroke-width="3"/>
+  <rect x="42" y="6" width="16" height="16" rx="4" fill="none" stroke="#2f6f6a" stroke-width="3"/>
+  <rect x="6" y="24" width="16" height="16" rx="4" fill="none" stroke="#2f6f6a" stroke-width="3"/>
+  <rect x="24" y="24" width="16" height="16" rx="4" fill="#cf6a3c"/>
+  <rect x="42" y="24" width="16" height="16" rx="4" fill="none" stroke="#2f6f6a" stroke-width="3"/>
+  <rect x="6" y="42" width="16" height="16" rx="4" fill="none" stroke="#2f6f6a" stroke-width="3"/>
+  <rect x="24" y="42" width="16" height="16" rx="4" fill="none" stroke="#2f6f6a" stroke-width="3"/>
+  <rect x="42" y="42" width="16" height="16" rx="4" fill="none" stroke="#2f6f6a" stroke-width="3"/>
+</svg>
