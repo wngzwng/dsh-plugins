@@ -204,10 +204,13 @@ window.__ModuleLoader__.load({
         'tr.content': 'Content',
         'tr.contentPlaceholder': 'Why it belongs here (optional)',
         'tr.editContent': 'Edit content',
+        'pc.deleteCard': 'Delete this card?',
+        'pc.deleteCardHint': 'You can bring it back with Undo.',
+        'pc.deleteNode': 'Delete “{name}”?',
+        'pc.deleteNodeHint': 'Its children move up. You can bring it back with Undo.',
+        'pc.delete': 'Delete',
+        'pc.cancel': 'Cancel',
         'tr.delete': 'Delete',
-        'tr.deleteConfirm': 'Delete this node? Its children move up.',
-        'tr.confirm': 'Delete',
-        'tr.cancel': 'Cancel',
         'tr.moveUp': 'Move up',
         'tr.moveDown': 'Move down',
         'tr.edit': 'Edit title',
@@ -401,10 +404,13 @@ window.__ModuleLoader__.load({
         'tr.content': '内容',
         'tr.contentPlaceholder': '为什么它属于这里（可选）',
         'tr.editContent': '编辑内容',
+        'pc.deleteCard': '删除这张卡片？',
+        'pc.deleteCardHint': '可以用「撤销」恢复。',
+        'pc.deleteNode': '删除「{name}」？',
+        'pc.deleteNodeHint': '子项会上移；可以用「撤销」恢复。',
+        'pc.delete': '删除',
+        'pc.cancel': '取消',
         'tr.delete': '删除',
-        'tr.deleteConfirm': '删除这个节点？它的子项会上移。',
-        'tr.confirm': '确认删除',
-        'tr.cancel': '取消',
         'tr.moveUp': '上移',
         'tr.moveDown': '下移',
         'tr.edit': '改标题',
@@ -515,6 +521,11 @@ window.__ModuleLoader__.load({
       '.kt-card:hover .kt-card-del,.kt-card-del:focus-visible{opacity:1}',
       '.kt-card-del:hover{color:var(--dsw-alias-state-error-primary);background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 12%,transparent)}',
       '.kt-card-body{display:flex;flex-direction:column;gap:6px;padding:0 10px 10px}',
+      '.kt-inline-confirm{display:inline-flex;flex:none;align-items:center;gap:2px}',
+      '.kt-inline-confirm .kt-text-btn{font-size:11.5px;padding:0 4px;white-space:nowrap}',
+      '.kt-confirm-del{height:22px;padding:0 8px;border-radius:7px;border:.5px solid color-mix(in srgb,var(--dsw-alias-state-error-primary) 45%,var(--dsw-alias-border-l1));background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 10%,transparent);color:var(--dsw-alias-state-error-primary);font:inherit;font-size:11.5px;line-height:20px;cursor:pointer;white-space:nowrap}',
+      '.kt-confirm-del:hover{background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 20%,transparent)}',
+      '.kt-trow-confirming .kt-trow-actions{opacity:1}',
       '.kt-img-panel{display:flex;flex-direction:column;gap:4px}',
       '.kt-img-drop{display:block;width:100%;box-sizing:border-box;padding:8px 10px;border:.5px dashed var(--dsw-alias-border-l2);border-radius:9px;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:11.5px;line-height:16px;text-align:center;cursor:pointer}',
       '.kt-img-drop:hover{border-color:var(--dsw-alias-brand-primary);color:var(--dsw-alias-brand-primary)}',
@@ -607,7 +618,6 @@ window.__ModuleLoader__.load({
       '.kt-content-placeholder{color:var(--dsw-alias-label-secondary);opacity:.8}',
       '.kt-inline-actions{display:flex;gap:6px}',
       '.kt-add-row-inline{display:flex;gap:6px;margin:2px 8px 8px 28px}',
-      '.kt-confirm-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:2px 8px 8px 28px;font-size:12px;color:var(--dsw-alias-state-error-primary)}',
       '.kt-graph-scroll{width:100%;overflow:auto}',
       '.kt-graph{position:relative}',
       '.kt-graph-edges{position:absolute;left:0;top:0;pointer-events:none;overflow:visible}',
@@ -2636,6 +2646,63 @@ window.__ModuleLoader__.load({
       );
     }
 
+    function InlineConfirm(props) {
+      const { t, label, hint, onConfirm, onCancel } = props;
+      const wrapRef = React.useRef(null);
+      const cancelRef = React.useRef(null);
+
+      React.useEffect(() => {
+        if (cancelRef.current !== null) cancelRef.current.focus();
+        function onDown(event) {
+          if (wrapRef.current !== null && wrapRef.current.contains(event.target)) return;
+          onCancel();
+        }
+        function onKey(event) {
+          if (event.key === 'Escape') {
+            event.preventDefault();
+            onCancel();
+          }
+        }
+        document.addEventListener('mousedown', onDown, true);
+        document.addEventListener('keydown', onKey);
+        return () => {
+          document.removeEventListener('mousedown', onDown, true);
+          document.removeEventListener('keydown', onKey);
+        };
+      }, [onCancel]);
+
+      return h(
+        'span',
+        { className: 'kt-inline-confirm', ref: wrapRef, role: 'group', 'aria-label': label },
+        h(
+          'button',
+          {
+            type: 'button',
+            className: 'kt-text-btn',
+            ref: cancelRef,
+            onClick: (event) => {
+              event.stopPropagation();
+              onCancel();
+            },
+          },
+          t('pc.cancel'),
+        ),
+        h(
+          'button',
+          {
+            type: 'button',
+            className: 'kt-confirm-del',
+            title: hint,
+            onClick: (event) => {
+              event.stopPropagation();
+              onConfirm();
+            },
+          },
+          t('pc.delete'),
+        ),
+      );
+    }
+
     function ImagePanel(props) {
       const { card, store, t, showNotice, compact } = props;
       const inputRef = React.useRef(null);
@@ -2753,6 +2820,7 @@ window.__ModuleLoader__.load({
       const composingRef = React.useRef(false);
       const expanded = new Set(state.ui.expanded);
       const [promptOpen, setPromptOpen] = React.useState(false);
+      const [deleteTarget, setDeleteTarget] = React.useState(null);
       const defaultPrompts = [];
       for (let index = 0; index < PROMPT_COUNT; index += 1) {
         defaultPrompts.push(t('bs.prompt.' + index));
@@ -2800,20 +2868,31 @@ window.__ModuleLoader__.load({
               { className: 'kt-card-chevron', title: open ? t('card.collapse') : t('card.expand') },
               open ? '▴' : '▾',
             ),
-            h(
-              'button',
-              {
-                type: 'button',
-                className: 'kt-card-del',
-                'aria-label': t('tr.delete'),
-                title: t('tr.delete'),
-                onClick: (event) => {
-                  event.stopPropagation();
-                  store.removeCard(card.id);
-                },
-              },
-              h(Icon, { name: 'close', size: 12 }),
-            ),
+            deleteTarget === card.id
+              ? h(InlineConfirm, {
+                  t,
+                  label: t('pc.deleteCard'),
+                  hint: t('pc.deleteCardHint'),
+                  onConfirm: () => {
+                    store.removeCard(card.id);
+                    setDeleteTarget(null);
+                  },
+                  onCancel: () => setDeleteTarget(null),
+                })
+              : h(
+                  'button',
+                  {
+                    type: 'button',
+                    className: 'kt-card-del',
+                    'aria-label': t('tr.delete'),
+                    title: t('tr.delete'),
+                    onClick: (event) => {
+                      event.stopPropagation();
+                      setDeleteTarget(card.id);
+                    },
+                  },
+                  h(Icon, { name: 'close', size: 12 }),
+                ),
           ),
           open
             ? h(
@@ -3573,11 +3652,25 @@ window.__ModuleLoader__.load({
     /* ------------------------------------------------------------------ */
 
     function TreeNode(props) {
-      const { card, index, store, t, collapsed, expanded, dragApi, trail, depth, showNotice } = props;
+      const {
+        card,
+        index,
+        store,
+        t,
+        collapsed,
+        expanded,
+        dragApi,
+        trail,
+        depth,
+        showNotice,
+        requestDelete,
+        confirmId,
+        confirmDelete,
+        cancelDelete,
+      } = props;
       const [editingTitle, setEditingTitle] = React.useState(false);
       const [editingContent, setEditingContent] = React.useState(false);
       const [addOpen, setAddOpen] = React.useState(false);
-      const [confirming, setConfirming] = React.useState(false);
       const [over, setOver] = React.useState(false);
       const kids = index.primaryChildrenOf.get(card.id) || [];
       const refs = index.secondaryChildrenOf.get(card.id) || [];
@@ -3593,7 +3686,8 @@ window.__ModuleLoader__.load({
             'kt-trow' +
             (over ? ' kt-trow-over' : '') +
             (dragApi.dragId === card.id ? ' kt-trow-dragging' : '') +
-            (editingTitle || editingContent || addOpen ? ' kt-trow-editing' : ''),
+            (editingTitle || editingContent || addOpen ? ' kt-trow-editing' : '') +
+            (confirmId === card.id ? ' kt-trow-confirming' : ''),
           draggable: !editingTitle && !editingContent && !addOpen,
           role: 'treeitem',
           tabIndex: 0,
@@ -3723,26 +3817,32 @@ window.__ModuleLoader__.load({
             { type: 'button', className: 'kt-mini-btn', title: t('tr.edit'), 'aria-label': t('tr.edit'), onClick: () => setEditingTitle(true) },
             h(Icon, { name: 'edit', size: 12 }),
           ),
-          h(
-            'button',
-            { type: 'button', className: 'kt-mini-btn kt-mini-btn-danger', title: t('tr.delete'), 'aria-label': t('tr.delete'), onClick: () => setConfirming(true) },
-            h(Icon, { name: 'trash', size: 12 }),
-          ),
+          confirmId === card.id
+            ? h(InlineConfirm, {
+                t,
+                label: t('pc.deleteNode', { name: card.title }),
+                hint: t('pc.deleteNodeHint'),
+                onConfirm: confirmDelete,
+                onCancel: cancelDelete,
+              })
+            : h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'kt-mini-btn kt-mini-btn-danger',
+                  title: t('tr.delete'),
+                  'aria-label': t('tr.delete'),
+                  onClick: (event) => {
+                    event.stopPropagation();
+                    requestDelete(card);
+                  },
+                },
+                h(Icon, { name: 'trash', size: 12 }),
+              ),
         ),
       );
 
       const extras = [];
-      if (confirming) {
-        extras.push(
-          h(
-            'div',
-            { className: 'kt-confirm-row', key: 'confirm' },
-            h('span', null, t('tr.deleteConfirm')),
-            h('button', { type: 'button', className: 'kt-btn kt-btn-danger', onClick: () => store.removeCard(card.id) }, t('tr.confirm')),
-            h('button', { type: 'button', className: 'kt-btn', onClick: () => setConfirming(false) }, t('tr.cancel')),
-          ),
-        );
-      }
       if (open || editingContent) {
         extras.push(
           h(
@@ -3856,6 +3956,10 @@ window.__ModuleLoader__.load({
               depth: depth + 1,
               trail: new Set(trail).add(card.id),
               showNotice,
+              requestDelete,
+              confirmId,
+              confirmDelete,
+              cancelDelete,
             }),
           );
         });
@@ -3999,6 +4103,20 @@ window.__ModuleLoader__.load({
       const healthy = cycles.length === 0;
 
       const [dragId, setDragId] = React.useState(null);
+      const [confirmId, setConfirmId] = React.useState(null);
+
+      function requestDeleteFromRow(card) {
+        setConfirmId(card.id);
+      }
+
+      function confirmDeleteFromRow() {
+        if (confirmId !== null) store.removeCard(confirmId);
+        setConfirmId(null);
+      }
+
+      function cancelDeleteFromRow() {
+        setConfirmId(null);
+      }
 
       const dragApi = {
         dragId,
@@ -4163,6 +4281,10 @@ window.__ModuleLoader__.load({
                     depth: 0,
                     trail: new Set(),
                     showNotice,
+                    requestDelete: requestDeleteFromRow,
+                    confirmId,
+                    confirmDelete: confirmDeleteFromRow,
+                    cancelDelete: cancelDeleteFromRow,
                   }),
                 ),
               );
