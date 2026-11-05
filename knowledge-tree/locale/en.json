@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Knowledge Tree",
+    "description": "List what you know, drag each card onto its parent, then settle everything into one tree. Three views plus Markdown / Mermaid / JSON export; data stays in this browser."
+  }
+}

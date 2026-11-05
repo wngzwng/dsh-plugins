@@ -1,0 +1,4 @@
+# To-do List bundle patch: one Host row; the list itself is the Client half.
+- insert:
+    - id: todo-list
+      name: '@local/todo-list'

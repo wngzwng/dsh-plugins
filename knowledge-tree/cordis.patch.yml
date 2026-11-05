@@ -1,0 +1,4 @@
+# Knowledge Tree bundle patch: one Host row; the tree itself is the Client half.
+- insert:
+    - id: knowledge-tree
+      name: '@local/knowledge-tree'

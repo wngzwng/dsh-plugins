@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="To-do List">
+  <rect x="10" y="8" width="44" height="48" rx="9" fill="none" stroke="#2f6f6a" stroke-width="3"/>
+  <rect x="17" y="16" width="10" height="10" rx="3" fill="#2f9e44"/>
+  <path d="M19.4 21.2l2 2 3.6-4.1" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  <line x1="33" y1="21" x2="47" y2="21" stroke="#2f6f6a" stroke-width="3" stroke-linecap="round"/>
+  <rect x="17" y="31" width="10" height="10" rx="3" fill="none" stroke="#2f6f6a" stroke-width="2.4"/>
+  <line x1="33" y1="36" x2="47" y2="36" stroke="#2f6f6a" stroke-width="3" stroke-linecap="round"/>
+  <rect x="17" y="45" width="10" height="10" rx="3" fill="none" stroke="#2f6f6a" stroke-width="2.4"/>
+  <line x1="33" y1="50" x2="43" y2="50" stroke="#2f6f6a" stroke-width="3" stroke-linecap="round"/>
+</svg>
