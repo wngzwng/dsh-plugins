@@ -595,7 +595,7 @@ window.__ModuleLoader__.load({
       '.kt-tree-title{width:100%;max-width:420px;margin:0 0 8px;padding:0 2px;border:0;border-bottom:.5px dashed transparent;background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:16px;font-weight:500;line-height:26px}',
       '.kt-tree-title:hover{border-bottom-color:var(--dsw-alias-border-l2)}',
       '.kt-tree-title:focus{outline:none;border-bottom-color:var(--dsw-alias-brand-primary)}',
-      '.kt-trow{display:flex;align-items:center;gap:4px;min-height:32px;padding:2px 6px;border-radius:8px;border:.5px solid transparent}',
+      '.kt-trow{display:flex;align-items:center;gap:4px;min-height:32px;padding:2px 6px;border-radius:8px;border:.5px solid transparent;cursor:pointer}',
       '.kt-trow:hover{background:color-mix(in srgb,var(--dsw-alias-label-secondary) 7%,transparent)}',
       '.kt-trow-over{border-color:var(--dsw-alias-brand-primary);background:color-mix(in srgb,var(--dsw-alias-brand-primary) 13%,transparent)}',
       '.kt-trow-dragging{opacity:.4}',
@@ -3693,6 +3693,25 @@ window.__ModuleLoader__.load({
           tabIndex: 0,
           'aria-level': depth + 1,
           'aria-expanded': kids.length > 0 ? !hidden : undefined,
+          onClick: (event) => {
+            if (confirmId === card.id) return;
+            const target = event.target;
+            if (
+              target !== null &&
+              target !== undefined &&
+              typeof target.closest === 'function' &&
+              target.closest('button, input, textarea, select, a, .kt-trow-actions') !== null
+            ) {
+              return;
+            }
+            store.toggleExpand(card.id);
+          },
+          onKeyDown: (event) => {
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+            if (event.target !== event.currentTarget) return;
+            event.preventDefault();
+            store.toggleExpand(card.id);
+          },
           onDragStart: (event) => dragApi.begin(event, card.id),
           onDragEnd: dragApi.end,
           onDragOver: (event) => {
@@ -3766,7 +3785,6 @@ window.__ModuleLoader__.load({
                 className: 'kt-trow-title',
                 title:
                   card.content === '' ? card.title : card.title + ' · ' + t('card.expand'),
-                onClick: () => store.toggleExpand(card.id),
                 onDoubleClick: () => setEditingTitle(true),
               },
               card.title,

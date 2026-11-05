@@ -1,6 +1,6 @@
 {
   "name": "@local/knowledge-tree",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "private": true,
   "description": "Knowledge Tree for the DeepSeek Harness Web UI: list knowledge cards (title + content), classify them on a self-arranging whiteboard by dragging a card onto its parent, then settle everything into one tree. Local browser storage, Markdown / Mermaid / JSON export.",
   "type": "module",
