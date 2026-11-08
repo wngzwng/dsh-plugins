@@ -1,7 +1,7 @@
 # DSH Plugins
 
 面向 [DeepSeek Harness](https://deepseek.com)（DSH）Web UI 的插件集合。每个插件都是独立的 DSH bundle：
-Host 半在 `index.js` 里只登记一行清单，界面全部在浏览器半 `client.js` 里实现，挂到 Harness 的
+基础插件的 Host 半只登记清单；知识树另有已鉴权的 GitHub 同步 Host 服务。界面在浏览器半 `client.js` 里实现，挂到 Harness 的
 既定槽位（输入框 dock、左侧栏、整页 `main` 面板等）上。颜色统一走主题 token，跟随浅色 / 深色。
 
 ## 插件
@@ -36,18 +36,18 @@ git clone git@github.com:wngzwng/dsh-plugins.git
 - 依赖 DSH 客户端插件机制：`package.json` 中的 `dsh.bundle.patch` 与 `dsh.client`、
   `cordis.patch.yml` 插入 Host 行、`client.js` 通过 `window.__ModuleLoader__.load` 注册浏览器半。
 - 只从共享模块表取 `react`，不依赖 Harness 内部包。
-- 组件、图标、字体与绘制元素全部随插件打包，无外部资源请求。
+- 组件、图标、字体与绘制元素随插件打包。知识树仅在用户主动操作 GitHub 同步时通过 Host 访问 GitHub API。
 
 ## 数据与隐私
 
-所有插件的数据都保存在浏览器 `localStorage`，不经过 Host、不上传：
+默认保存在当前浏览器：基础插件使用 `localStorage`，知识树 v2.0 使用 IndexedDB。知识树可选择连接 GitHub，经 Host 手动读取/推送；只有主动 Push 才上传正文与图片，公开仓库内容公开可见。其他插件不上传：
 
 | 插件 | 存储键 | 内容 |
 | --- | --- | --- |
 | 番茄时钟 | `dsh-pomodoro-clock:settings:v1`、`dsh-pomodoro-clock:stats:v1` | 时长 / 每轮次数 / 自动开始 / 提示音设置，今日番茄数 |
 | 人生九宫格 | `dsh-life-grid/v1` | 按年度保存的九宫格内容（目标、重点领域、年度主题、五年愿景） |
 | 待办清单 | `dsh-todo-list/v1`、`dsh-todo-list:ui/v1` | 任务与自建分组，上次选中的分组与筛选 |
-| 知识树 | `dsh-knowledge-tree/v2`、`dsh-knowledge-tree:ui/v2` | 阶段、树名、卡片（标题 / 内容 / 归属状态）与链接；上次视图、折叠与展开状态 |
+| 知识树 | IndexedDB `dsh-knowledge-tree-library`；引导语 localStorage `dsh-knowledge-tree:prompts/v1` | 多棵本地树、配图、同步基线、远端只读缓存与恢复快照；保留旧 localStorage 迁移源 |
 
 换浏览器、清缓存或换设备前，建议用各插件右上角的「导出 JSON」留一份备份。
 
@@ -95,7 +95,7 @@ dsh-plugins/
 
 ## 开发
 
-插件是纯前端 bundle，没有构建步骤，改完 `client.js` 后在 DSH 中重新加载插件即可：
+基础插件为纯前端 bundle；知识树增加 Host 服务，修改 `library.js` 或 `workspace-ui.js` 后先运行 `node knowledge-tree/build-client.mjs` 重新嵌入 Client，再重新加载插件并刷新现有 DSH 页面：
 
 - 元数据（名称、图标、加载方式）在 `package.json` 的 `dsh` 字段；
 - 挂载点由 `cordis.patch.yml` 与 `client.js` 里的 slot / key 决定；

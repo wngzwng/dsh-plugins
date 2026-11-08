@@ -19,6 +19,1020 @@ window.__ModuleLoader__.load({
     const React = require('react');
     const h = React.createElement;
 
+    /* BEGIN GENERATED WORKSPACE MODULES */
+/**
+ * Browser/Node ESM library. No imports and no localStorage writes.
+ * createLibrary is deliberately self-contained so its source can be embedded in
+ * the browser bundle. Inject an IDBFactory (not an IDBDatabase).
+ *
+ * All promises settle on transaction completion, not request success. Errors
+ * have a stable `code` and keep the original failure in `cause` when available.
+ *
+ * init/listLocal => LocalRecord[]; getLocal/getRemote => record or null.
+ * createLocal(document, {id?, sync?, ui?}) / saveLocal(record,
+ * {expectedRevision?}) => LocalRecord. saveLocal defaults its CAS expectation to
+ * record.revision, and never upserts a deleted record. deleteLocal => boolean.
+ * getSetting => JSON or null; setSetting(key, JSON) => JSON (null clears a value).
+ * cacheRemote(key, snapshot) => {remoteKey, snapshot, updatedAt}; listRemote
+ * filters literal string prefixes. Remote keys must not contain credentials.
+ * snapshotLocal => {id, localId, record, createdAt}; listSnapshots(localId?)
+ * => snapshots newest first. restoreSnapshot => NEW LocalRecord, never an
+ * overwrite. Snapshots survive deletion; there is no automatic retention limit.
+ * close() permanently closes this instance; instantiate again to reopen.
+ *
+ * Settings block credential-shaped keys recursively, not arbitrary secret
+ * values: callers must keep tokens in memory and never pass them to this API.
+ * Documents allow structural cycles (the UI diagnoses them), but reject bad
+ * endpoints, duplicate IDs/pairs and multiple primary parents. No data is
+ * silently repaired or discarded when a migration fails.
+ */
+function createLibrary({ indexedDB, legacyStorage, onBlocked } = {}) {
+  const DATABASE = 'dsh-knowledge-tree-library';
+  const VERSION = 1;
+  const LEGACY_KEYS = ['dsh-knowledge-tree/v3', 'dsh-knowledge-tree/v2', 'dsh-knowledge-tree/v1'];
+  const MIGRATION_KEY = 'legacy-migration-v1';
+  const PRIVATE_KEY = /token|authorization|password|secret|credential|api[-_]?key/i;
+  let database = null;
+  let opening = null;
+  let initializing = null;
+  let initialized = false;
+  let closed = false;
+
+  function error(code, message, cause) {
+    const result = new Error(message);
+    result.name = 'LibraryError';
+    result.code = code;
+    if (cause !== undefined) result.cause = cause;
+    return result;
+  }
+  function plain(value) {
+    return value !== null && typeof value === 'object' && !Array.isArray(value) &&
+      (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null);
+  }
+  function copy(value, code = 'INVALID_DATA') {
+    const seen = new Set();
+    function visit(item) {
+      if (item === null || typeof item === 'string' || typeof item === 'boolean') return item;
+      if (typeof item === 'number' && Number.isFinite(item)) return item;
+      if (typeof item !== 'object' || (!Array.isArray(item) && !plain(item)) || seen.has(item)) {
+        throw error(code, 'Only finite, acyclic JSON data can be stored.');
+      }
+      seen.add(item);
+      let result;
+      if (Array.isArray(item)) {
+        result = Array.from(item, visit);
+      } else {
+        result = {};
+        for (const key of Object.keys(item)) {
+          Object.defineProperty(result, key, { value: visit(item[key]), enumerable: true, writable: true, configurable: true });
+        }
+      }
+      seen.delete(item);
+      return result;
+    }
+    return visit(value);
+  }
+  function nonempty(value, label) {
+    if (typeof value !== 'string' || value.length === 0) throw error('INVALID_ARGUMENT', label + ' must be a nonempty string.');
+    return value;
+  }
+  function randomId(prefix) {
+    const crypto = globalThis.crypto;
+    if (!crypto || typeof crypto.getRandomValues !== 'function') {
+      throw error('CRYPTO_UNAVAILABLE', 'Secure random IDs require crypto.getRandomValues.');
+    }
+    const bytes = crypto.getRandomValues(new Uint8Array(16));
+    return prefix + '_' + Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+  }
+  function documentData(input, legacy = false) {
+    const fail = (message) => { throw error('INVALID_DOCUMENT', message); };
+    if (!plain(input)) fail('Document must be an object.');
+    if (legacy ? ![undefined, 1, 2, 3].includes(input.version) : ![2, 3].includes(input.version)) fail('Unsupported document version.');
+    if (!Array.isArray(input.cards) || !Array.isArray(input.links)) fail('Document cards and links must be arrays.');
+    if (!['brainstorm', 'classify', 'tree'].includes(input.stage)) fail('Invalid document stage.');
+    if (input.title !== undefined && typeof input.title !== 'string') fail('Document title must be a string.');
+    if (!legacy && typeof input.title !== 'string') fail('Document title must be a string.');
+    const source = copy(input, 'INVALID_DOCUMENT');
+    const ids = new Set();
+    const cards = source.cards.map((card, index) => {
+      if (!plain(card)) fail('Every card must be an object.');
+      const id = legacy && !card.id ? randomId('c') : card.id;
+      if (typeof id !== 'string' || !id || ids.has(id)) fail('Card IDs must be nonempty and unique.');
+      ids.add(id);
+      const title = legacy && card.title === undefined ? card.text : card.title;
+      const content = legacy && card.content === undefined ? (card.note === undefined ? '' : card.note) : card.content;
+      if (typeof title !== 'string' || typeof content !== 'string') fail('Card title and content must be strings.');
+      const next = { ...card, id, title, content };
+      if (legacy) {
+        delete next.text;
+        delete next.note;
+        if (next.order === undefined) next.order = index;
+        if (next.placed === undefined) next.placed = false;
+        if (next.image === undefined) next.image = null;
+        if (next.createdAt === undefined) next.createdAt = 0;
+      }
+      return next;
+    });
+    const linkIds = new Set();
+    const pairs = new Set();
+    const primaries = new Set();
+    const links = source.links.map((link) => {
+      if (!plain(link)) fail('Every link must be an object.');
+      const id = legacy && !link.id ? randomId('l') : link.id;
+      if (typeof id !== 'string' || !id || linkIds.has(id)) fail('Link IDs must be nonempty and unique.');
+      linkIds.add(id);
+      if (!ids.has(link.parentId) || !ids.has(link.childId) || link.parentId === link.childId) fail('Link endpoints must reference two different cards.');
+      const pair = JSON.stringify([link.parentId, link.childId]);
+      if (pairs.has(pair)) fail('Duplicate link endpoints.');
+      pairs.add(pair);
+      if (link.primary !== undefined && typeof link.primary !== 'boolean') fail('Link primary must be boolean.');
+      const primary = legacy && link.primary === undefined ? !primaries.has(link.childId) : link.primary === true;
+      if (primary && primaries.has(link.childId)) fail('A card cannot have multiple primary parents.');
+      if (primary) primaries.add(link.childId);
+      return { ...link, id, primary };
+    });
+    if (legacy) {
+      for (const link of links) {
+        if (!primaries.has(link.childId)) { link.primary = true; primaries.add(link.childId); }
+      }
+      const children = new Set(links.map((link) => link.childId));
+      for (const card of cards) if (children.has(card.id)) card.placed = true;
+    }
+    // Preserve a validated remote/local document byte-semantically (including optional
+    // fields and version); normalization belongs only to the legacy migration/editor.
+    if (!legacy) return source;
+    return { version: 3, stage: source.stage, title: source.title || '', cards, links };
+  }
+  function syncData(input) {
+    if (input === undefined || input === null) return { remoteKey: null, baseHash: null };
+    if (!plain(input)) throw error('INVALID_ARGUMENT', 'sync must be an object.');
+    const result = { remoteKey: input.remoteKey ?? null, baseHash: input.baseHash ?? null };
+    if (input.treeId !== undefined && input.treeId !== null) {
+      if (typeof input.treeId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(input.treeId)) throw error('INVALID_ARGUMENT', 'sync.treeId must be a safe tree ID.');
+      result.treeId = input.treeId;
+    }
+    if (result.remoteKey !== null) nonempty(result.remoteKey, 'sync.remoteKey');
+    if (result.baseHash !== null && typeof result.baseHash !== 'string') throw error('INVALID_ARGUMENT', 'sync.baseHash must be a string or null.');
+    if (input.baseDocument !== undefined) result.baseDocument = documentData(input.baseDocument);
+    return result;
+  }
+  function settingsData(key, value) {
+    nonempty(key, 'Setting key');
+    if (PRIVATE_KEY.test(key)) throw error('SENSITIVE_SETTING', 'Tokens and credentials cannot be persisted in settings.');
+    if (value === undefined) return;
+    const result = copy(value);
+    function inspect(item) {
+      if (!item || typeof item !== 'object') return;
+      for (const name of Object.keys(item)) {
+        if (PRIVATE_KEY.test(name)) throw error('SENSITIVE_SETTING', 'Tokens and credentials cannot be persisted in settings.');
+        inspect(item[name]);
+      }
+    }
+    inspect(result);
+    return result;
+  }
+  function open() {
+    if (closed) return Promise.reject(error('CLOSED', 'Library connection has been closed. Create a new library instance.'));
+    if (database) return Promise.resolve(database);
+    if (opening) return opening;
+    opening = new Promise((resolve, reject) => {
+      if (!indexedDB || typeof indexedDB.open !== 'function') {
+        reject(error('IDB_UNAVAILABLE', 'IndexedDB is unavailable; localStorage fallback is intentionally disabled.'));
+        return;
+      }
+      let request;
+      let blocked = false;
+      try { request = indexedDB.open(DATABASE, VERSION); }
+      catch (cause) { reject(error('IDB_OPEN_FAILED', 'Could not open the local library.', cause)); return; }
+      request.onupgradeneeded = () => {
+        const db = request.result;
+        for (const [name, keyPath] of [['locals', 'id'], ['remotes', 'remoteKey'], ['settings', 'key'], ['snapshots', 'id'], ['meta', 'key']]) {
+          if (!db.objectStoreNames.contains(name)) db.createObjectStore(name, { keyPath });
+        }
+      };
+      request.onblocked = () => {
+        blocked = true;
+        const failure = error('IDB_BLOCKED', 'Library upgrade is blocked. Close other Knowledge Tree tabs and retry.');
+        try { if (typeof onBlocked === 'function') onBlocked(failure); } catch (_) { /* notification must not mask the storage error */ }
+        reject(failure);
+      };
+      request.onerror = () => reject(error('IDB_OPEN_FAILED', 'Could not open the local library.', request.error));
+      request.onsuccess = () => {
+        const db = request.result;
+        if (blocked || closed) { db.close(); if (closed) reject(error('CLOSED', 'Library connection has been closed.')); return; }
+        database = db;
+        db.onversionchange = () => { db.close(); database = null; };
+        resolve(db);
+      };
+    }).finally(() => { opening = null; });
+    return opening;
+  }
+  async function transaction(names, mode, work) {
+    const db = await open();
+    return new Promise((resolve, reject) => {
+      let tx;
+      try { tx = db.transaction(names, mode); }
+      catch (cause) { reject(error('IDB_TRANSACTION_FAILED', 'Could not start a library transaction.', cause)); return; }
+      let result;
+      let failure;
+      const fail = (cause) => {
+        failure = cause && cause.name === 'LibraryError' && typeof cause.code === 'string' ? cause : error('IDB_WRITE_FAILED', 'Library transaction failed; no changes were committed.', cause);
+        try { tx.abort(); } catch (_) { reject(failure); }
+      };
+      const context = {
+        store: (name) => tx.objectStore(name),
+        result: (value) => { result = value; },
+        request: (request, success) => {
+          request.onsuccess = () => { try { success(request.result); } catch (cause) { fail(cause); } };
+        },
+      };
+      tx.oncomplete = () => resolve(result);
+      tx.onabort = () => reject(failure || error('IDB_TRANSACTION_FAILED', 'Library transaction aborted; no changes were committed.', tx.error));
+      // Let request errors abort the whole transaction; never swallow quota errors.
+      tx.onerror = () => {};
+      try { work(context); } catch (cause) { fail(cause); }
+    });
+  }
+  function all(name) {
+    return transaction([name], 'readonly', (tx) => tx.request(tx.store(name).getAll(), tx.result));
+  }
+  function read(name, key) {
+    return transaction([name], 'readonly', (tx) => tx.request(tx.store(name).get(key), (value) => tx.result(value ?? null)));
+  }
+  function localRecord(document, { id, sync, ui } = {}) {
+    return { id: id === undefined ? randomId('tree') : nonempty(id, 'Local id'), document: documentData(document),
+      ui: ui === undefined ? {} : copy(ui), sync: syncData(sync), updatedAt: Date.now(), revision: 1 };
+  }
+  function readLegacy() {
+    if (!legacyStorage) return { document: { version: 3, stage: 'brainstorm', title: '', cards: [], links: [] }, ui: {} };
+    try {
+      let raw = null;
+      for (const key of LEGACY_KEYS) {
+        const value = legacyStorage.getItem(key);
+        if (value !== null && value !== undefined) { raw = value; break; }
+      }
+      const document = raw === null ? { version: 3, stage: 'brainstorm', title: '', cards: [], links: [] } : documentData(JSON.parse(raw), true);
+      const rawUi = legacyStorage.getItem('dsh-knowledge-tree:ui/v2');
+      const ui = rawUi === null || rawUi === undefined ? {} : copy(JSON.parse(rawUi));
+      if (!plain(ui)) throw error('INVALID_DATA', 'Legacy UI state must be an object.');
+      const rawPrompts = legacyStorage.getItem('dsh-knowledge-tree:prompts/v1');
+      const prompts = rawPrompts === null || rawPrompts === undefined ? undefined : settingsData('prompts', JSON.parse(rawPrompts));
+      return { document, ui, prompts };
+    } catch (cause) {
+      throw error('LEGACY_MIGRATION_FAILED', 'Legacy data could not be migrated. Original keys are untouched; repair the data and retry init().', cause);
+    }
+  }
+  async function init() {
+    if (initialized) return all('locals');
+    if (initializing) return initializing;
+    initializing = (async () => {
+      const marker = await read('meta', MIGRATION_KEY);
+      if (!marker) {
+        const legacy = readLegacy(); // Parse BEFORE opening a write transaction. Failure leaves migration pending.
+        const record = localRecord(legacy.document, { ui: legacy.ui });
+        await transaction(['meta', 'locals', 'settings'], 'readwrite', (tx) => {
+          tx.request(tx.store('meta').get(MIGRATION_KEY), (current) => {
+            if (current) return; // Another tab completed migration while we were reading legacy storage.
+            tx.store('locals').add(record);
+            if (legacy.prompts !== undefined) tx.store('settings').put({ key: 'prompts', value: legacy.prompts });
+            tx.store('meta').add({ key: MIGRATION_KEY, value: true, migratedAt: Date.now() });
+          });
+        });
+      }
+      initialized = true;
+      return all('locals');
+    })().finally(() => { initializing = null; });
+    return initializing;
+  }
+  async function ensureInitialized() { if (!initialized) await init(); }
+  async function listLocal() { await ensureInitialized(); return (await all('locals')).sort((a, b) => b.updatedAt - a.updatedAt || a.id.localeCompare(b.id)); }
+  async function getLocal(id) { nonempty(id, 'Local id'); await ensureInitialized(); return read('locals', id); }
+  async function createLocal(document, options = {}) {
+    const record = localRecord(document, options);
+    await ensureInitialized();
+    return transaction(['locals'], 'readwrite', (tx) => {
+      tx.request(tx.store('locals').get(record.id), (current) => {
+        if (current) throw error('ALREADY_EXISTS', 'A local tree with this ID already exists.');
+        tx.store('locals').add(record);
+        tx.result(record);
+      });
+    });
+  }
+  async function saveLocal(record, { expectedRevision } = {}) {
+    if (!plain(record)) throw error('INVALID_ARGUMENT', 'Local record must be an object.');
+    const id = nonempty(record.id, 'Local id');
+    const expected = expectedRevision === undefined ? record.revision : expectedRevision;
+    if (!Number.isSafeInteger(expected) || expected < 1) throw error('INVALID_REVISION', 'Saving requires the previously read revision or expectedRevision.');
+    const next = { id, document: documentData(record.document), ui: copy(record.ui === undefined ? {} : record.ui), sync: syncData(record.sync) };
+    await ensureInitialized();
+    return transaction(['locals'], 'readwrite', (tx) => {
+      tx.request(tx.store('locals').get(id), (current) => {
+        if (!current) throw error('NOT_FOUND', 'The local tree no longer exists.');
+        if (current.revision !== expected) throw error('REVISION_CONFLICT', 'This tree changed in another tab. Reload it before saving.');
+        if (!Number.isSafeInteger(current.revision + 1)) throw error('INVALID_REVISION', 'Revision limit exceeded.');
+        const saved = { ...next, revision: current.revision + 1, updatedAt: Math.max(Date.now(), current.updatedAt + 1) };
+        tx.store('locals').put(saved);
+        tx.result(saved);
+      });
+    });
+  }
+  async function deleteLocal(id, { expectedRevision } = {}) {
+    nonempty(id, 'Local id'); await ensureInitialized();
+    return transaction(['locals'], 'readwrite', (tx) => {
+      tx.request(tx.store('locals').get(id), (current) => {
+        if (expectedRevision !== undefined && current?.revision !== expectedRevision) throw error('REVISION_CONFLICT', 'This tree changed before deletion.');
+        tx.store('locals').delete(id); tx.result(Boolean(current));
+      });
+    });
+  }
+  async function getSetting(key) { settingsData(key); await ensureInitialized(); const row = await read('settings', key); return row ? row.value : null; }
+  async function setSetting(key, value) {
+    if (value === undefined) throw error('INVALID_DATA', 'Setting values must be JSON; use null to clear a value.');
+    const safe = settingsData(key, value); await ensureInitialized();
+    return transaction(['settings'], 'readwrite', (tx) => { tx.store('settings').put({ key, value: safe }); tx.result(safe); });
+  }
+  async function cacheRemote(remoteKey, snapshot) {
+    nonempty(remoteKey, 'Remote key');
+    const value = copy(snapshot);
+    // Cache may carry transport metadata, but documents, when present, must be valid.
+    if (plain(value) && value.document !== undefined) value.document = documentData(value.document);
+    else if (plain(value) && value.version !== undefined) documentData(value);
+    const row = { remoteKey, snapshot: value, updatedAt: Date.now() }; await ensureInitialized();
+    return transaction(['remotes'], 'readwrite', (tx) => { tx.store('remotes').put(row); tx.result(row); });
+  }
+  async function getRemote(remoteKey) { nonempty(remoteKey, 'Remote key'); await ensureInitialized(); return read('remotes', remoteKey); }
+  async function listRemote(remotePrefix = '') {
+    if (typeof remotePrefix !== 'string') throw error('INVALID_ARGUMENT', 'Remote prefix must be a string.');
+    await ensureInitialized(); return (await all('remotes')).filter((row) => row.remoteKey.startsWith(remotePrefix)).sort((a, b) => a.remoteKey.localeCompare(b.remoteKey));
+  }
+  async function snapshotLocal(id) {
+    nonempty(id, 'Local id'); const snapshotId = randomId('snapshot'); await ensureInitialized();
+    return transaction(['locals', 'snapshots'], 'readwrite', (tx) => {
+      tx.request(tx.store('locals').get(id), (record) => {
+        if (!record) throw error('NOT_FOUND', 'Cannot snapshot a missing local tree.');
+        const snapshot = { id: snapshotId, localId: id, record, createdAt: Date.now() };
+        tx.store('snapshots').add(snapshot); tx.result(snapshot);
+      });
+    });
+  }
+  async function listSnapshots(id) {
+    if (id !== undefined) nonempty(id, 'Local id'); await ensureInitialized();
+    return (await all('snapshots')).filter((row) => id === undefined || row.localId === id).sort((a, b) => b.createdAt - a.createdAt || a.id.localeCompare(b.id));
+  }
+  async function restoreSnapshot(snapshotId) {
+    nonempty(snapshotId, 'Snapshot id'); await ensureInitialized();
+    const id = randomId('tree');
+    return transaction(['snapshots', 'locals'], 'readwrite', (tx) => {
+      tx.request(tx.store('snapshots').get(snapshotId), (snapshot) => {
+        if (!snapshot) throw error('NOT_FOUND', 'Snapshot does not exist.');
+        // Restoring always creates a copy. Never silently roll back an edited original.
+        // A recovered copy has a NEW identity and must not retain a remote write association.
+        const record = localRecord(snapshot.record.document, { id, ui: snapshot.record.ui });
+        tx.store('locals').add(record); tx.result(record);
+      });
+    });
+  }
+  function close() { closed = true; if (database) database.close(); database = null; }
+  return { init, listLocal, getLocal, createLocal, saveLocal, deleteLocal, getSetting, setSetting,
+    cacheRemote, getRemote, listRemote, snapshotLocal, listSnapshots, restoreSnapshot, close };
+}
+
+/** Deterministic JSON for hashing: object keys sorted, array order preserved.
+ * Rejects undefined, nonfinite numbers, sparse arrays, class instances and cycles
+ * rather than silently dropping or changing data. Does not hash or mutate input.
+ */
+function canonicalStringify(value) {
+  const ancestors = new Set();
+  function stringify(item) {
+    if (item === null || typeof item === 'string' || typeof item === 'boolean') return JSON.stringify(item);
+    if (typeof item === 'number' && Number.isFinite(item)) return JSON.stringify(item);
+    if (typeof item !== 'object' || ancestors.has(item)) throw new TypeError('Canonical JSON requires finite, acyclic JSON data.');
+    ancestors.add(item);
+    let result;
+    if (Array.isArray(item)) {
+      result = '[' + Array.from(item, stringify).join(',') + ']';
+    } else {
+      const proto = Object.getPrototypeOf(item);
+      if (proto !== Object.prototype && proto !== null) throw new TypeError('Canonical JSON requires plain objects.');
+      result = '{' + Object.keys(item).sort().map((key) => JSON.stringify(key) + ':' + stringify(item[key])).join(',') + '}';
+    }
+    ancestors.delete(item);
+    return result;
+  }
+  return stringify(value);
+}
+
+// Kept self-contained so the client adapter can embed this function verbatim.
+function createWorkspaceComponents(React) {
+  const { createElement: h, useState, useRef, useEffect } = React;
+  const clone = (value) => value == null ? value : JSON.parse(JSON.stringify(value));
+  const stable = (value) => JSON.stringify(value, function (key, item) {
+    if (key === 'updatedAt') return undefined;
+    if (item && typeof item === 'object' && !Array.isArray(item)) {
+      return Object.keys(item).sort().reduce((out, name) => { out[name] = item[name]; return out; }, {});
+    }
+    return item;
+  });
+  // Keep the exact stored/remote representation when editor normalization alone changes it
+  // (for example, an omitted image becoming null). Apply only actual editor changes.
+  const reconcileEditor = (raw, projected, edited) => {
+    if (stable(projected) === stable(edited)) return clone(raw);
+    if (Array.isArray(edited)) {
+      return edited.map((item, index) => {
+        const keyed = item && typeof item === 'object' && typeof item.id === 'string';
+        const before = keyed && Array.isArray(projected) ? projected.find((value) => value && value.id === item.id) : projected?.[index];
+        const original = keyed && Array.isArray(raw) ? raw.find((value) => value && value.id === item.id) : raw?.[index];
+        return before === undefined ? clone(item) : reconcileEditor(original, before, item);
+      });
+    }
+    if (edited && projected && typeof edited === 'object' && typeof projected === 'object') {
+      const result = raw && typeof raw === 'object' && !Array.isArray(raw) ? clone(raw) : {};
+      for (const key of Object.keys(projected)) if (!(key in edited)) delete result[key];
+      for (const key of Object.keys(edited)) {
+        const value = reconcileEditor(raw?.[key], projected[key], edited[key]);
+        if (value === undefined) delete result[key]; else result[key] = value;
+      }
+      return result;
+    }
+    return clone(edited);
+  };
+  const remotePrefix = (config) => JSON.stringify([config.owner, config.repo, config.branch, config.directory]) + '/';
+  const cachedSnapshot = (row) => row && (row.snapshot || row);
+  const errorText = (error) => error && error.message ? error.message : String(error || '未知错误');
+  const hashValue = (result) => typeof result === 'string' ? result : result && (result.hash || result.documentHash);
+  const title = (record) => record && record.document && record.document.title || '未命名知识树';
+  const counts = (document) => `${(document.cards || []).length} 张卡片 · ${(document.links || []).length} 条关系 · ${(document.cards || []).filter((card) => card.image).length} 张图片`;
+  const imageData = (image) => image && typeof image.data === 'string' && /^data:image\/(?:png|jpeg|webp|gif);base64,[a-z0-9+/\s]+=*$/i.test(image.data) ? image.data : null;
+  const css = `
+.ktw{--kw-bg:var(--dsw-alias-bg-base,#fff);--kw-layer:var(--dsw-alias-bg-layer-1,#f6f7f9);--kw-text:var(--dsw-alias-label-primary,#20242b);--kw-muted:var(--dsw-alias-label-secondary,#666d79);--kw-border:var(--dsw-alias-border-l1,#d8dde5);--kw-brand:var(--dsw-alias-brand-primary,#3765cf);color:var(--kw-text);background:var(--kw-bg);height:100%;min-height:420px;display:flex;flex-direction:column;font:13px/1.5 system-ui,sans-serif;overflow:auto}
+.ktw *{box-sizing:border-box}.ktw button,.ktw input,.ktw textarea{font:inherit;color:inherit}.ktw button{cursor:pointer;border:1px solid var(--kw-border);border-radius:7px;padding:5px 9px;background:var(--kw-bg)}.ktw button:disabled{cursor:not-allowed;opacity:.5}.ktw button[aria-current=true]{border-color:var(--kw-brand);color:var(--kw-brand)}.ktw input,.ktw textarea{border:1px solid var(--kw-border);background:var(--kw-bg);border-radius:6px;padding:6px;max-width:100%}.ktw input:focus,.ktw textarea:focus,.ktw button:focus-visible,.ktw summary:focus-visible{outline:2px solid var(--kw-brand);outline-offset:2px}.ktw header,.ktw .kw-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px;border-bottom:1px solid var(--kw-border)}.ktw h2,.ktw h3{margin:0 0 8px;font-size:15px}.ktw .kw-body{display:flex;flex:1;min-height:0}.ktw nav{width:210px;flex:none;padding:12px;border-right:1px solid var(--kw-border);overflow:auto}.ktw nav ul{list-style:none;padding:0;margin:8px 0 18px}.ktw nav li{margin:5px 0}.ktw .kw-tree{width:100%;text-align:left;overflow-wrap:anywhere}.ktw main{flex:1;min-width:0;display:flex;flex-direction:column}.ktw .kw-columns{display:flex;flex:1;min-height:0;overflow:auto}.ktw .kw-pane{flex:1;min-width:0;overflow:auto;border-right:1px solid var(--kw-border)}.ktw .kw-pane>h3{padding:10px;background:var(--kw-layer);margin:0}.ktw .kw-editor{height:100%;min-height:360px}.ktw .kw-view{padding:12px}.ktw .kw-muted{color:var(--kw-muted);font-size:12px}.ktw .kw-notice{padding:8px 12px;white-space:pre-wrap;overflow-wrap:anywhere;background:var(--kw-layer)}.ktw .kw-error{color:var(--dsw-alias-state-error-primary,#b3261e)}.ktw .kw-card{border:1px solid var(--kw-border);border-radius:8px;margin:8px 0;padding:8px;overflow-wrap:anywhere}.ktw .kw-card summary{cursor:pointer;font-weight:600}.ktw .kw-card pre{white-space:pre-wrap;font:inherit}.ktw img{display:block;max-width:100%;max-height:600px;object-fit:contain}.ktw .kw-dialog{position:fixed;inset:0;z-index:80;background:#0006;display:flex;align-items:center;justify-content:center;padding:20px}.ktw .kw-dialog form{background:var(--kw-bg);border:1px solid var(--kw-border);border-radius:12px;padding:20px;width:520px;max-height:90vh;overflow:auto}.ktw label{display:block;margin:8px 0}.ktw label input,.ktw label textarea{display:block;width:100%;margin-top:4px}.ktw .kw-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.ktw .kw-inline{padding:8px;border:1px solid var(--kw-border);border-radius:6px;margin:6px 0}.ktw .kw-snapshots{padding:10px}.ktw .kw-search{width:100%}@media(max-width:850px){.ktw nav{width:165px}.ktw .kw-columns{flex-direction:column}.ktw .kw-pane{min-height:280px;flex:none}.ktw .kw-editor{height:520px}}
+`;
+
+  const menuCss = `.ktw .kw-context-menu{position:fixed;z-index:10000;display:flex;flex-direction:column;min-width:160px;padding:5px;border:1px solid var(--kw-border);border-radius:9px;background:var(--kw-bg);box-shadow:0 6px 22px #0002}.ktw .kw-context-menu button{border:0;text-align:left;padding:8px 12px}.ktw .kw-context-menu button:hover,.ktw .kw-context-menu button:focus-visible{background:var(--kw-layer)}.ktw .kw-context-menu .kw-danger{color:var(--dsw-alias-state-error-primary,#b3261e)}`;
+
+  function ReadOnlyTree({ snapshot }) {
+    const [query, setQuery] = useState('');
+    const [expanded, setExpanded] = useState(false);
+    const document = snapshot.document;
+    const cards = document.cards || [];
+    const links = document.links || [];
+    const names = new Map(cards.map((card) => [card.id, card.title]));
+    const name = (id) => names.get(id) || `未知卡片（${id}）`;
+    const matching = cards.filter((card) => {
+      const relations = links.filter((link) => link.childId === card.id || link.parentId === card.id).map((link) => name(link.childId === card.id ? link.parentId : link.childId)).join(' ');
+      return `${card.title || ''} ${card.content || ''} ${relations}`.toLowerCase().includes(query.toLowerCase());
+    });
+    return h('div', { className: 'kw-view' },
+      h('h2', null, document.title || '未命名知识树'),
+      h('p', { className: 'kw-muted' }, `${counts(document)}。远端只读，不会保存或上传。`),
+      h('label', null, '搜索卡片、正文与关联名称', h('input', { className: 'kw-search', type: 'search', value: query, onChange: (event) => setQuery(event.target.value) })),
+      h('button', { type: 'button', onClick: () => setExpanded(!expanded) }, expanded ? '收起全部卡片' : '展开全部卡片'),
+      h('p', { className: 'kw-muted', 'aria-live': 'polite' }, `显示 ${matching.length} / ${cards.length} 张卡片`),
+      matching.map((card) => {
+        const parents = links.filter((link) => link.childId === card.id);
+        const primary = parents.find((link) => link.primary);
+        const related = new Set(parents.filter((link) => !link.primary).map((link) => name(link.parentId)));
+        links.filter((link) => link.parentId === card.id && !link.primary).forEach((link) => related.add(name(link.childId)));
+        const children = links.filter((link) => link.parentId === card.id && link.primary).map((link) => name(link.childId));
+        const image = imageData(card.image);
+        return h('details', { key: `${card.id}:${expanded}:${query}`, className: 'kw-card', open: expanded || !!query },
+          h('summary', null, card.title || '无标题卡片'),
+          h('p', { className: 'kw-muted' }, `主父节点：${primary ? name(primary.parentId) : '顶层 / 未分类'}`),
+          children.length > 0 && h('p', { className: 'kw-muted' }, `下级：${children.join('、')}`),
+          h('p', { className: 'kw-muted' }, `关联：${Array.from(related).join('、') || '无'}`),
+          h('pre', null, card.content || '（暂无正文）'),
+          image && h('a', { href: image, target: '_blank', rel: 'noopener noreferrer', 'aria-label': `查看图片：${card.title || '卡片图片'}` }, h('img', { src: image, alt: card.title || '卡片图片', loading: 'lazy' })),
+          card.image && !image && h('p', { className: 'kw-muted' }, '图片格式无效，已阻止加载。'));
+      }));
+  }
+
+  function Workspace({ library, createEditor, renderEditor, rpc, normalizeDocument }) {
+    const [locals, setLocals] = useState([]);
+    const [selected, setSelected] = useState(null);
+    const [remoteItems, setRemoteItems] = useState([]);
+    const [remote, setRemote] = useState(null);
+    const [status, setStatus] = useState(null);
+    const [busy, setBusy] = useState(false);
+    const [pushing, setPushing] = useState(false);
+    const [ready, setReady] = useState(false);
+    const [notice, setNotice] = useState('');
+    const [error, setError] = useState('');
+    const [configOpen, setConfigOpen] = useState(false);
+    const [form, setForm] = useState({ owner: '', repo: '', branch: 'main', directory: 'knowledge-trees', token: '' });
+    const [deleteId, setDeleteId] = useState(null);
+    const [treeMenu, setTreeMenu] = useState(null);
+    const menuRef = useRef(null);
+    const menuTrigger = useRef(null);
+    const [nameDialog, setNameDialog] = useState(null);
+    const [treeName, setTreeName] = useState('');
+    const [nameError, setNameError] = useState('');
+    const [pushOpen, setPushOpen] = useState(false);
+    const [dirty, setDirty] = useState(null);
+    const dirtyEpoch = useRef(0);
+    const [message, setMessage] = useState('更新知识树');
+    const [conflict, setConflict] = useState(null);
+    const [snapshots, setSnapshots] = useState(null);
+    const [, rerender] = useState(0);
+    const contexts = useRef(new Map());
+    const selectedRef = useRef(null);
+    const busyRef = useRef(false);
+    const alive = useRef(true);
+    const configRef = useRef(null);
+    const update = () => { if (alive.current) rerender((value) => value + 1); };
+    const normal = (document) => clone(normalizeDocument ? normalizeDocument(clone(document)) : document);
+    const current = selected && contexts.current.get(selected);
+    const showError = (reason) => { if (alive.current) setError(errorText(reason)); };
+    const hash = async (document) => {
+      const result = hashValue(await rpc('hashDocument', { document: clone(document) }));
+      if (!result || typeof result !== 'string') throw new Error('主机未返回有效文档哈希，已取消操作。');
+      return result;
+    };
+    const refreshLocals = async () => {
+      const list = await library.listLocal();
+      if (alive.current) setLocals(Array.isArray(list) ? list : list.records || []);
+      return Array.isArray(list) ? list : list.records || [];
+    };
+    const remember = async (id) => { try { await library.setSetting('workspace.selectedTreeId', id); } catch (reason) { showError(reason); } };
+    const canLeave = () => {
+      const context = contexts.current.get(selectedRef.current);
+      if (context && (context.pending || context.error)) {
+        showError(new Error('当前知识树尚未成功保存。请先重试保存，避免切换后丢失编辑。'));
+        return false;
+      }
+      return true;
+    };
+    const queue = (context, action) => {
+      const task = context.tail.catch(() => {}).then(action);
+      context.tail = task;
+      // The editor adapter may fire and forget; the promise still rejects for callers that await it.
+      task.catch(() => {});
+      return task;
+    };
+    const save = (context, document, ui) => {
+      context.draft = { document: reconcileEditor(context.editorRaw, context.editorProjection, document), ui: clone(ui || {}) };
+      const capture = clone(context.draft);
+      const sequence = ++context.sequence;
+      context.pending++;
+      update();
+      return queue(context, async () => {
+        try {
+          const latest = await library.getLocal(context.id);
+          if (!latest) throw new Error('本地知识树已被删除；内存中的编辑仍保留，请勿关闭页面。');
+          if (latest.revision !== context.record.revision) throw new Error('本地记录已在另一窗口更新。为防止覆盖，未保存当前编辑。');
+          const result = await library.saveLocal({ ...latest, document: capture.document, ui: capture.ui }, { expectedRevision: latest.revision });
+          context.record = result || await library.getLocal(context.id);
+          context.savedSequence = sequence;
+          context.error = null;
+          await refreshLocals();
+          return context.record;
+        } catch (reason) {
+          context.error = reason;
+          showError(new Error(`本地保存失败：${errorText(reason)}。编辑保留在当前页面，请重试保存。`));
+          throw reason;
+        } finally { context.pending--; update(); }
+      });
+    };
+    const activate = async (recordOrId, force = false) => {
+      if (!canLeave()) return false;
+      const id = typeof recordOrId === 'string' ? recordOrId : recordOrId.id;
+      let context = contexts.current.get(id);
+      if (!context) {
+        const record = await library.getLocal(id);
+        if (!record) throw new Error('找不到本地知识树。');
+        const projection = normal(record.document);
+        // updatedAt belongs to the editor's runtime state, not its persisted document.
+        delete projection.updatedAt;
+        context = { id, record, editorRaw: clone(record.document), editorProjection: clone(projection), draft: { document: clone(record.document), ui: clone(record.ui || {}) }, tail: Promise.resolve(), pending: 0, sequence: 0, savedSequence: 0, error: null };
+        context.store = createEditor({ ...record, document: projection }, (document, ui) => save(context, document, ui));
+        contexts.current.set(id, context);
+      }
+      if (!canLeave()) return false;
+      selectedRef.current = id;
+      setSelected(id);
+      setSnapshots(null);
+      await remember(id);
+      return true;
+    };
+    const flush = async (context) => {
+      if (!context) return;
+      await context.tail.catch(() => {});
+      if (context.error || context.pending) throw new Error('请先成功保存本地编辑，再执行同步。');
+    };
+    const run = async (action) => {
+      if (busyRef.current) return;
+      busyRef.current = true;
+      setBusy(true);
+      setError('');
+      setNotice('');
+      try { await action(); } catch (reason) { showError(reason); }
+      finally { busyRef.current = false; if (alive.current) { setBusy(false); setPushing(false); } }
+    };
+    const readRemote = async (treeId) => {
+      const config = configRef.current;
+      if (!config) throw new Error('请先配置 GitHub 仓库。');
+      const response = await rpc('readTree', { treeId });
+      if (!response || response.found === false || response.notFound || !response.document) throw new Error('远端知识树不存在或无法读取；未更改任何本地内容。');
+      // Hash/cache the exact remote document. Normalization is an editor projection only.
+      const document = clone(response.document);
+      const documentHash = await hash(document);
+      const snapshot = { ...response, treeId, document, hash: documentHash, cachedAt: Date.now(), remoteKey: remotePrefix(config) + treeId };
+      await library.cacheRemote(snapshot.remoteKey, snapshot);
+      return snapshot;
+    };
+    const openRemote = (treeId) => run(async () => {
+      setConflict(null);
+      const key = remotePrefix(configRef.current) + treeId;
+      try {
+        const snapshot = await readRemote(treeId);
+        setRemote({ ...snapshot, offline: false });
+      } catch (reason) {
+        const row = await library.getRemote(key);
+        const cached = cachedSnapshot(row);
+        if (cached && cached.document) {
+          setRemote({ ...cached, cachedAt: cached.cachedAt || row.updatedAt, treeId, remoteKey: key, document: clone(cached.document), offline: true });
+          setNotice(`远端读取失败：${errorText(reason)}。正在显示离线缓存，不可将缓存用于拉取覆盖。`);
+        } else { setRemote(null); throw reason; }
+      }
+    });
+    const refreshRemote = () => run(async () => {
+      if (!configRef.current) throw new Error('请先配置 GitHub 仓库。');
+      const result = await rpc('listTrees', {});
+      const items = Array.isArray(result) ? result : result && (result.trees || result.items) || [];
+      setRemoteItems(items.map((item) => typeof item === 'string' ? { treeId: item, title: item } : { ...item, treeId: item.treeId || item.id }));
+      setNotice('远端目录已手动刷新；未上传或替换任何知识树。');
+    });
+
+    useEffect(() => {
+      alive.current = true;
+      const initialized = Promise.resolve().then(() => library.init());
+      (async () => {
+        try {
+          await initialized;
+          const records = await refreshLocals();
+          const previous = await library.getSetting('workspace.selectedTreeId');
+          const chosen = records.find((record) => record.id === previous) || records[0];
+          if (chosen && alive.current) await activate(chosen, true);
+        } catch (reason) { showError(reason); }
+        finally { if (alive.current) setReady(true); }
+      })();
+      (async () => {
+        try {
+          await initialized;
+          const result = await rpc('status', {});
+          if (!alive.current) return;
+          setStatus(result);
+          configRef.current = result.configured ? result.config : null;
+          if (result.config) setForm({ ...result.config, token: '' });
+          if (configRef.current) {
+            const cached = await library.listRemote(remotePrefix(configRef.current));
+            if (alive.current) setRemoteItems((cached || []).map((row) => {
+              const item = cachedSnapshot(row);
+              return { ...item, treeId: item.treeId || (row.remoteKey || row.key || '').slice(remotePrefix(configRef.current).length), cached: true };
+            }));
+          }
+        } catch (reason) { showError(new Error(`GitHub 状态不可用（本地仍可编辑）：${errorText(reason)}`)); }
+      })();
+      return () => { alive.current = false; };
+    }, []);
+    useEffect(() => {
+      const beforeUnload = (event) => {
+        if (Array.from(contexts.current.values()).some((context) => context.pending || context.error)) {
+          event.preventDefault(); event.returnValue = '';
+        }
+      };
+      if (typeof window !== 'undefined') window.addEventListener('beforeunload', beforeUnload);
+      return () => { if (typeof window !== 'undefined') window.removeEventListener('beforeunload', beforeUnload); };
+    }, []);
+
+    useEffect(() => {
+      const epoch = ++dirtyEpoch.current;
+      if (!current) { setDirty(null); return; }
+      if (!current.record.sync?.baseHash) { setDirty('尚未推送'); return; }
+      setDirty('同步状态检查中');
+      hash(current.record.document).then((value) => {
+        if (alive.current && epoch === dirtyEpoch.current) setDirty(value === current.record.sync.baseHash ? '与同步基线一致' : '有未推送更改');
+      }).catch(() => {
+        if (alive.current && epoch === dirtyEpoch.current) setDirty('离线：同步状态待检查');
+      });
+    }, [selected, current?.record.revision]);
+
+    const openNameDialog = (record) => {
+      if (!canLeave()) return;
+      setNameError('');
+      setTreeName(record ? contexts.current.get(record.id)?.draft.document.title ?? record.document.title : '新知识树');
+      setNameDialog(record ? { id: record.id, revision: record.revision } : { id: null });
+    };
+    const closeTreeMenu = (restoreFocus = false) => {
+      setTreeMenu(null);
+      if (restoreFocus) menuTrigger.current?.focus();
+    };
+    const openTreeMenu = (event, record, keyboard = false) => {
+      event.preventDefault();
+      if (busyRef.current) return;
+      const button = event.currentTarget;
+      menuTrigger.current = button;
+      const bounds = button.getBoundingClientRect?.() || { left: 0, bottom: 0 };
+      const width = typeof window !== 'undefined' ? window.innerWidth : 1024;
+      const height = typeof window !== 'undefined' ? window.innerHeight : 768;
+      const x = keyboard ? bounds.left : event.clientX;
+      const y = keyboard ? bounds.bottom : event.clientY;
+      setDeleteId(null);
+      setTreeMenu({ id: record.id, x: Math.max(8, Math.min(x || 0, width - 176)), y: Math.max(8, Math.min(y || 0, height - 108)) });
+    };
+    useEffect(() => {
+      if (!treeMenu || typeof document === 'undefined') return;
+      menuRef.current?.querySelector('button:not(:disabled)')?.focus();
+      const outside = (event) => { if (!menuRef.current?.contains(event.target)) closeTreeMenu(); };
+      const escape = (event) => { if (event.key === 'Escape') { event.preventDefault(); closeTreeMenu(true); } };
+      const dismiss = () => closeTreeMenu();
+      document.addEventListener('pointerdown', outside, true);
+      document.addEventListener('keydown', escape);
+      document.addEventListener('scroll', dismiss, true);
+      window.addEventListener('resize', dismiss);
+      return () => {
+        document.removeEventListener('pointerdown', outside, true);
+        document.removeEventListener('keydown', escape);
+        document.removeEventListener('scroll', dismiss, true);
+        window.removeEventListener('resize', dismiss);
+      };
+    }, [treeMenu]);
+    const newTree = () => openNameDialog(null);
+    const submitTreeName = (event) => {
+      event.preventDefault();
+      const clean = treeName.trim();
+      if (!clean || clean.length > 60) { setNameError('名称不能为空，且不能超过 60 个字符。'); return; }
+      setNameError('');
+      return run(async () => {
+        if (!canLeave()) return;
+        if (nameDialog.id === null) {
+          const record = await library.createLocal(normal({ version: 3, stage: 'brainstorm', title: clean, cards: [], links: [], updatedAt: Date.now() }));
+          await refreshLocals();
+          await activate(record, true);
+          setNotice('已新建本地知识树，不会自动上传。');
+        } else {
+          const context = contexts.current.get(nameDialog.id);
+          await flush(context);
+          const latest = await library.getLocal(nameDialog.id);
+          if (!latest) throw new Error('本地知识树已不存在。');
+          const expected = context ? context.record.revision : nameDialog.revision;
+          if (latest.revision !== expected) throw new Error('知识树已在另一窗口更新，未覆盖名称；请重新打开后重试。');
+          if (latest.document.title !== clean) {
+            if (context) {
+              // Update the existing editor too: the next card save must not restore its old title.
+              context.store.setTitle(clean);
+              await Promise.resolve();
+              await flush(context);
+            } else {
+              await library.saveLocal({ ...latest, document: { ...latest.document, title: clean } }, { expectedRevision: expected });
+            }
+          }
+          await refreshLocals();
+          setNotice('本地树已重命名；树 ID、卡片与同步关联不变，不会自动推送。');
+        }
+        setNameDialog(null);
+      });
+    };
+    const deleteTree = (id) => run(async () => {
+      if (!canLeave()) return;
+      if (typeof library.deleteLocal !== 'function') throw new Error('当前本地存储适配器不支持删除知识树。');
+      const record = await library.getLocal(id);
+      if (!record) throw new Error('知识树已不存在。');
+      await library.snapshotLocal(id, { reason: '删除本地知识树前' });
+      await library.deleteLocal(id, { expectedRevision: record.revision });
+      contexts.current.delete(id);
+      const records = await refreshLocals();
+      setDeleteId(null);
+      if (selectedRef.current === id) {
+        selectedRef.current = null; setSelected(null);
+        if (records[0]) await activate(records[0], true);
+        else await remember(null);
+      }
+      setNotice('本地知识树已删除；GitHub 远端内容未删除。');
+    });
+    const configure = (event) => {
+      event.preventDefault();
+      run(async () => {
+        const input = { owner: form.owner.trim(), repo: form.repo.trim(), branch: form.branch.trim(), directory: form.directory.trim() };
+        if (!input.owner || !input.repo || !input.branch || !input.directory) throw new Error('请填写仓库所有者、仓库名称、分支和目录。');
+        if (form.token.trim()) input.token = form.token.trim();
+        const result = await rpc('configure', input);
+        const next = result && typeof result.configured === 'boolean' ? result : await rpc('status', {});
+        configRef.current = next.configured ? next.config : null;
+        setStatus(next);
+        setForm({ ...(next.config || input), token: '' });
+        setRemote(null); setRemoteItems([]); setConflict(null); setConfigOpen(false);
+        setNotice('仓库配置已保存。没有自动上传；请手动刷新远端目录。');
+      });
+    };
+    const disconnect = () => run(async () => {
+      await rpc('disconnect', {});
+      const next = await rpc('status', {});
+      configRef.current = next.configured ? next.config : null;
+      setStatus(next);
+      setForm((value) => ({ ...value, token: '' }));
+      setRemote(null); setRemoteItems([]); setConflict(null); setConfigOpen(false);
+      setNotice('已清除主机本次会话的 PAT；仓库配置和本地知识树仍保留。若主机设置了环境变量令牌，该凭据仍然可用。');
+    });
+    const push = () => run(async () => {
+      setPushing(true);
+      const context = contexts.current.get(selectedRef.current);
+      if (!context) throw new Error('请先选择本地知识树。');
+      if (!configRef.current) throw new Error('请先配置仓库。');
+      if (!message.trim()) throw new Error('请填写提交说明。');
+      await flush(context);
+      // Capture before the network request; subsequent typing remains local and is never replaced.
+      const captured = clone(context.record);
+      // Remove the confirmation overlay before awaiting the network: typing stays available.
+      setPushOpen(false);
+      setNotice('正在推送捕获的本地版本；你可以继续编辑，新编辑不会自动上传。');
+      const prefix = remotePrefix(configRef.current);
+      const associated = captured.sync && captured.sync.remoteKey && captured.sync.remoteKey.startsWith(prefix);
+      const treeId = associated ? captured.sync.treeId || captured.sync.remoteKey.slice(prefix.length) : captured.id;
+      const key = prefix + treeId;
+      const pushedHash = await hash(captured.document);
+      const response = await rpc('pushTree', { treeId, document: clone(captured.document), baseHash: associated ? captured.sync.baseHash || null : null, message: message.trim() });
+      if (response && (response.conflict || response.ok === false)) throw new Error('推送被拒绝：远端已更改。请手动读取远端并比较，不会强制覆盖。');
+      try {
+        await queue(context, async () => {
+          // Only edits saved by THIS context may advance its revision. Never adopt another
+          // window's document merely to patch metadata: this editor still holds its old body.
+          const latest = await library.getLocal(context.id);
+          if (!latest) throw new Error('本地记录已删除，无法记录同步基线。');
+          if (latest.revision !== context.record.revision) throw new Error('本地记录已在另一窗口更新，已拒绝记录同步元数据；请重新加载本地树。');
+          const result = await library.saveLocal({ ...latest, sync: { ...latest.sync, remoteKey: key, treeId, baseHash: pushedHash } }, { expectedRevision: context.record.revision });
+          context.record = result || await library.getLocal(context.id);
+        });
+      } catch (reason) {
+        throw new Error(`GitHub 推送已成功，但本地同步基线记录失败：${errorText(reason)}。远端提交已存在，请勿误认为推送失败而重复覆盖。`);
+      }
+      await refreshLocals(); update();
+      setPushOpen(false);
+      setNotice('已推送捕获的本地版本。推送期间的新编辑仍保留在本地，未被覆盖或自动上传。');
+    });
+    const pull = () => run(async () => {
+      if (!remote) throw new Error('请先读取一棵远端知识树。');
+      if (!canLeave()) return;
+      const snapshot = await readRemote(remote.treeId);
+      setRemote({ ...snapshot, offline: false });
+      const records = await refreshLocals();
+      const matching = records.find((record) => record.sync && record.sync.remoteKey === snapshot.remoteKey);
+      if (!matching) {
+        const collision = await library.getLocal(snapshot.treeId);
+        const options = { sync: { remoteKey: snapshot.remoteKey, treeId: snapshot.treeId, baseHash: snapshot.hash } };
+        if (!collision) options.id = snapshot.treeId;
+        const created = await library.createLocal(snapshot.document, options);
+        await refreshLocals(); await activate(created, true);
+        setConflict(null);
+        setNotice(collision ? '本地 ID 已存在，已用新 ID 导入远端；同步仍指向原远端树。' : '已导入远端为同 ID 的本地知识树；以后编辑只保存在本地。');
+        return;
+      }
+      const context = contexts.current.get(matching.id);
+      await flush(context);
+      // Serialize with editor saves while we calculate hashes and decide whether replacement is safe.
+      const replace = async () => {
+        const latest = await library.getLocal(matching.id);
+        if (!latest) throw new Error('本地知识树已不存在。');
+        if (context && latest.revision !== context.record.revision) throw new Error('本地记录已在另一窗口更新，请重新加载本地树后再拉取。');
+        if (context && (context.pending || context.error)) throw new Error('检测到正在编辑或保存；请保存后重试拉取。');
+        const localHash = await hash(latest.document);
+        const baseHash = latest.sync && latest.sync.baseHash;
+        if (localHash === snapshot.hash) {
+          // Equal content may still have an obsolete base. Metadata-only CAS stays in
+          // the editor queue, so later keystrokes retain their body and use our revision.
+          // A cross-window change fails CAS rather than being absorbed into this context.
+          if (baseHash !== snapshot.hash) {
+            const saved = await library.saveLocal({ ...latest, sync: { ...latest.sync, remoteKey: snapshot.remoteKey, treeId: snapshot.treeId, baseHash: snapshot.hash } }, { expectedRevision: latest.revision });
+            if (context) context.record = saved || await library.getLocal(latest.id);
+          }
+          await refreshLocals(); setConflict(null); setNotice('本地与远端内容相同，已对齐同步基线，未替换内容。'); return;
+        }
+        const localDirty = localHash !== baseHash;
+        const remoteChanged = snapshot.hash !== baseHash;
+        if (localDirty && !remoteChanged) { setConflict(null); setNotice('远端没有变化。保留本地未推送编辑，不执行覆盖。'); return; }
+        if (localDirty && remoteChanged) {
+          setConflict({ snapshot, localId: latest.id });
+          setNotice('本地与远端均有更改：已停止拉取。请并排比较，可将远端另存为独立本地树。');
+          return;
+        }
+        // Saves initiated while hashDocument was awaiting must never be discarded.
+        if (context && (context.pending || context.error)) throw new Error('拉取检查期间出现新编辑，已取消替换。');
+        const verified = await library.getLocal(latest.id);
+        if (!verified || verified.revision !== latest.revision) throw new Error('拉取检查期间本地版本已变化，已取消替换。');
+        await library.snapshotLocal(latest.id, { reason: '拉取远端替换前' });
+        if (context && (context.pending || context.error)) throw new Error('快照期间出现新编辑，已取消替换。');
+        const sequence = context && context.sequence;
+        const result = await library.saveLocal({ ...latest, document: snapshot.document, ui: {}, sync: { ...latest.sync, remoteKey: snapshot.remoteKey, treeId: snapshot.treeId, baseHash: snapshot.hash } }, { expectedRevision: latest.revision });
+        const saved = result || await library.getLocal(latest.id);
+        if (context && context.sequence !== sequence) {
+          // A keystroke can arrive during IndexedDB's final asynchronous CAS. Keep its editor
+          // alive, advance its revision, and let the already-queued save persist that draft.
+          context.record = saved;
+          setNotice('已读取远端；替换期间的新编辑仍保留在原编辑器，并将继续保存在本地。');
+        } else {
+          contexts.current.delete(latest.id);
+          if (selectedRef.current === latest.id) await activate(saved, true);
+          setNotice('已拉取远端；替换前的本地版本已保存为快照。');
+        }
+        await refreshLocals(); setConflict(null);
+      };
+      if (context) await queue(context, replace); else await replace();
+    });
+    const saveIndependent = () => run(async () => {
+      if (!conflict || !canLeave()) return;
+      const record = await library.createLocal(clone(conflict.snapshot.document));
+      await refreshLocals(); await activate(record, true);
+      setConflict(null);
+      setNotice('远端版本已另存为独立本地树（新 ID、无同步关联），原本地树未更改。');
+    });
+    const loadSnapshots = () => run(async () => {
+      if (!selectedRef.current) return;
+      const list = await library.listSnapshots(selectedRef.current);
+      setSnapshots(Array.isArray(list) ? list : list.snapshots || []);
+    });
+    const restore = (snapshot) => run(async () => {
+      if (!canLeave()) return;
+      const context = contexts.current.get(selectedRef.current);
+      await flush(context);
+      const restored = await library.restoreSnapshot(snapshot.id || snapshot.snapshotId);
+      await refreshLocals();
+      // Restoring is copy-only in the library. Re-check navigation safety in case
+      // the original editor received input while the restore transaction awaited.
+      if (canLeave()) await activate(restored, true);
+      setNotice('已将快照恢复为新的本地知识树，原树没有被覆盖，也不会自动推送。');
+    });
+
+    return h('section', { className: 'ktw', 'aria-label': '知识树工作区' },
+      h('style', null, css + menuCss),
+      h('header', null, h('strong', null, '知识树工作区'), h('span', { className: 'kw-muted' }, '本地优先 · 只有点击推送才上传'),
+        h('button', { type: 'button', disabled: busy, onClick: () => setConfigOpen(true) }, 'GitHub 配置'),
+        h('span', { className: 'kw-muted' }, status && status.configured ? `${status.config.owner}/${status.config.repo} · ${status.credentialAvailable ? status.credentialSource === 'environment' || status.credentialSource === 'env' ? '环境变量令牌可用' : '凭据可用' : '无可用令牌（读取和推送均需令牌）'}` : '未连接 GitHub')),
+      error && h('div', { role: 'alert', className: 'kw-notice kw-error' }, error),
+      notice && h('div', { role: 'status', className: 'kw-notice' }, notice),
+      h('div', { className: 'kw-body', 'aria-busy': busy || !ready },
+        h('nav', { 'aria-label': '知识树导航' },
+          h('h2', null, '本地知识树'), h('button', { type: 'button', disabled: busy || !ready, onClick: newTree }, '新建本地树'),
+          !ready && h('p', null, '正在打开本地资料库…'),
+          h('ul', null, locals.map((record) => h('li', { key: record.id },
+            h('button', { type: 'button', className: 'kw-tree', 'aria-current': selected === record.id, disabled: busy,
+              title: '单击查看 · 双击重命名 · 右键更多操作', 'aria-haspopup': 'menu', 'aria-expanded': treeMenu?.id === record.id,
+              onClick: () => { closeTreeMenu(); if (!busyRef.current && selectedRef.current !== record.id) return activate(record).catch(showError); },
+              onDoubleClick: () => { closeTreeMenu(); if (!busyRef.current) openNameDialog(record); },
+              onContextMenu: (event) => openTreeMenu(event, record),
+              onKeyDown: (event) => { if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) openTreeMenu(event, record, true); else if (event.key === 'F2') { event.preventDefault(); if (!busyRef.current) openNameDialog(record); } },
+            }, title(record)),
+            deleteId === record.id && h('div', { className: 'kw-inline' }, h('p', null, '仅删除本地树，确定吗？'), h('button', { type: 'button', disabled: busy, onClick: () => deleteTree(record.id) }, '确认删除'), ' ', h('button', { type: 'button', disabled: busy, onClick: () => setDeleteId(null) }, '取消'))))),
+          h('h2', null, 'GitHub 远端'),
+          h('button', { type: 'button', disabled: busy || !status?.configured, onClick: refreshRemote }, '手动刷新远端目录'),
+          h('p', { className: 'kw-muted' }, '点击只读浏览，不会导入或覆盖本地。'),
+          h('ul', null, remoteItems.filter((item) => item.treeId).map((item) => h('li', { key: item.treeId }, h('button', { type: 'button', className: 'kw-tree', disabled: busy, 'aria-current': remote?.treeId === item.treeId, onClick: () => openRemote(item.treeId) }, `${item.title || item.document?.title || item.treeId}${item.cached ? '（缓存）' : ''}`))))),
+        h('main', null,
+          h('div', { className: 'kw-toolbar' },
+            h('span', { className: 'kw-muted' }, current ? current.error ? '保存失败 · 编辑仍保留' : current.pending ? '正在本地保存…' : stable(current.draft.document) !== stable(current.record.document) ? '本地编辑尚未保存' : '已保存在本地' : '请选择或新建本地知识树'),
+            current && dirty && h('span', { className: 'kw-muted' }, dirty),
+            current?.error && h('button', { type: 'button', disabled: busy || !!current.pending, onClick: () => run(async () => { await save(current, current.draft.document, current.draft.ui); setNotice('本地保存成功。'); }) }, '重试保存'),
+            h('button', { type: 'button', disabled: busy || !current || !status?.configured || !!current.error || !!current.pending, onClick: () => setPushOpen(true) }, '推送当前本地树…'),
+            h('button', { type: 'button', disabled: busy || !remote || !!current?.error || !!current?.pending, onClick: pull }, '拉取当前远端树'),
+            h('button', { type: 'button', disabled: busy || !current, onClick: loadSnapshots }, '本地快照'),
+            remote && h('button', { type: 'button', disabled: busy, onClick: () => { setRemote(null); setConflict(null); } }, '关闭远端对照')),
+          conflict && h('div', { className: 'kw-notice' }, '冲突：未覆盖任何本地内容。', h('button', { type: 'button', disabled: busy, onClick: saveIndependent }, '将远端另存为独立本地树')),
+          snapshots && h('div', { className: 'kw-snapshots' }, h('h3', null, '本地历史快照（恢复为新树，不覆盖原树）'), snapshots.length ? snapshots.map((snapshot) => h('div', { key: snapshot.id || snapshot.snapshotId }, h('span', null, `${new Date(snapshot.createdAt || snapshot.updatedAt || 0).toLocaleString()} ${snapshot.reason || ''} `), h('button', { type: 'button', disabled: busy, onClick: () => restore(snapshot) }, '恢复此快照'))) : h('p', null, '暂无快照'), h('button', { type: 'button', onClick: () => setSnapshots(null) }, '收起快照')),
+          h('div', { className: 'kw-columns' },
+            h('section', { className: 'kw-pane', 'aria-label': '本地可编辑版本' }, h('h3', null, '本地版本 · 可编辑（不会自动上传）'), current ? h('div', { key: selected, className: 'kw-editor', inert: busy && !pushing ? true : undefined, 'aria-disabled': busy && !pushing || undefined }, renderEditor(current.store)) : h('div', { className: 'kw-view' }, '从左侧新建或选择一棵知识树。')),
+            remote && h('section', { className: 'kw-pane', 'aria-label': '远端只读版本' }, h('h3', null, `远端版本 · 只读${remote.offline ? ' · 离线缓存' : ''}`), h('p', { className: 'kw-notice kw-muted' }, `缓存时间：${new Date(remote.cachedAt || remote.fetchedAt || remote.updatedAt || 0).toLocaleString()}${remote.offline ? '（不是最新远端状态）' : '（手动读取）'}`), h(ReadOnlyTree, { key: `${remote.remoteKey}:${remote.hash}`, snapshot: remote }))))),
+      treeMenu && h('div', { ref: menuRef, role: 'menu', 'aria-label': '本地知识树操作', className: 'kw-context-menu', style: { left: treeMenu.x, top: treeMenu.y }, onKeyDown: (event) => {
+        const items = Array.from(event.currentTarget.querySelectorAll('button:not(:disabled)'));
+        const active = items.indexOf(document.activeElement);
+        if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+          event.preventDefault();
+          const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (active + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+          items[next]?.focus();
+        } else if (event.key === 'Tab') closeTreeMenu();
+      } },
+        h('button', { type: 'button', role: 'menuitem', disabled: busy || !!current?.pending || !!current?.error, onClick: () => { const record = locals.find(item => item.id === treeMenu.id); closeTreeMenu(); if (record) openNameDialog(record); } }, '重命名'),
+        h('button', { type: 'button', role: 'menuitem', className: 'kw-danger', disabled: busy, onClick: () => { setDeleteId(treeMenu.id); closeTreeMenu(true); } }, '删除')),
+      nameDialog && h('div', { className: 'kw-dialog' }, h('form', { role: 'dialog', 'aria-modal': true, 'aria-labelledby': 'kw-name-title', onSubmit: submitTreeName },
+        h('h2', { id: 'kw-name-title' }, nameDialog.id === null ? '新建本地树' : '重命名本地树'),
+        h('label', null, '知识树名称', h('input', { value: treeName, autoFocus: true, required: true, maxLength: 60, disabled: busy, 'aria-label': '知识树名称', onFocus: (event) => event.target.select(), onChange: (event) => { setTreeName(event.target.value); setNameError(''); }, onKeyDown: (event) => { if (event.key === 'Escape' && !busy) setNameDialog(null); if (event.key === 'Enter' && (event.nativeEvent?.isComposing || event.isComposing || event.keyCode === 229)) event.preventDefault(); } })),
+        h('p', { className: 'kw-muted' }, '1–60 个字符。名称不影响树 ID、卡片或同步关联；不会自动上传。'),
+        nameError && h('p', { role: 'alert', className: 'kw-error' }, nameError),
+        h('div', { className: 'kw-actions' }, h('button', { type: 'submit', disabled: busy }, nameDialog.id === null ? '创建' : '保存名称'), h('button', { type: 'button', disabled: busy, onClick: () => setNameDialog(null) }, '取消')))),
+      configOpen && h('div', { className: 'kw-dialog' }, h('form', { role: 'dialog', 'aria-modal': true, 'aria-labelledby': 'kw-config-title', onSubmit: configure },
+        h('h2', { id: 'kw-config-title' }, 'GitHub 仓库配置'),
+        h('p', null, '只连接你有权使用的仓库。配置后不会自动上传。公开仓库中的卡片正文和图片对所有人可见，请勿上传隐私内容。'),
+        [['owner', '仓库所有者'], ['repo', '仓库名称'], ['branch', '分支'], ['directory', '目录']].map(([key, label]) => h('label', { key }, label, h('input', { value: form[key], required: true, disabled: busy, onChange: (event) => setForm((value) => ({ ...value, [key]: event.target.value })) }))),
+        h('details', null, h('summary', null, '个人访问令牌（PAT）：用途与权限说明'), h('p', null, '当前连接器读取和推送均需要令牌；推送需要仓库 Contents 读写权限。建议使用仅授权该仓库的细粒度令牌。PAT 只保留在主机内存会话，插件重载或应用重启后需要重新填写；也可由主机环境变量 KNOWLEDGE_TREE_GITHUB_TOKEN 提供。不会写入本地知识树、浏览器 localStorage 或磁盘，也不会由配置接口回传。留空会保留现有凭据。'), h('label', null, 'PAT（可选）', h('input', { type: 'password', value: form.token, autoComplete: 'new-password', disabled: busy, onChange: (event) => setForm((value) => ({ ...value, token: event.target.value })) }))),
+        h('div', { className: 'kw-actions' }, h('button', { type: 'submit', disabled: busy }, '保存配置'), h('button', { type: 'button', disabled: busy, onClick: () => { setConfigOpen(false); setForm((value) => ({ ...value, token: '' })); } }, '取消'), h('button', { type: 'button', disabled: busy || !status?.configured, onClick: disconnect }, '清除本次会话 PAT')))),
+      pushOpen && current && h('div', { className: 'kw-dialog' }, h('form', { role: 'dialog', 'aria-modal': true, 'aria-labelledby': 'kw-push-title', onSubmit: (event) => { event.preventDefault(); push(); } },
+        h('h2', { id: 'kw-push-title' }, '确认推送当前本地树'), h('p', null, `仅推送「${title({ document: current.draft.document })}」，不会上传其他本地树。`),
+        h('p', null, counts(current.draft.document)), h('p', { className: 'kw-muted' }, '预览包含正文、关系和图片。点击推送时捕获已保存版本；推送期间仍可编辑，新编辑不会被覆盖。公开仓库内容对所有人可见。'),
+        h('label', null, '提交说明', h('textarea', { value: message, required: true, disabled: busy, onChange: (event) => setMessage(event.target.value) })),
+        h('div', { className: 'kw-actions' }, h('button', { type: 'submit', disabled: busy || !!current.pending || !!current.error }, busy ? '正在推送…' : '确认推送到 GitHub'), h('button', { type: 'button', disabled: busy, onClick: () => setPushOpen(false) }, '取消')))));
+  }
+  return { Workspace };
+}
+
+    /* END GENERATED WORKSPACE MODULES */
+
     const NS = 'knowledge-tree';
     const PANEL_ID = 'knowledge-tree';
     const STORAGE_KEY = 'dsh-knowledge-tree/v3';
@@ -59,7 +1073,7 @@ window.__ModuleLoader__.load({
         'page.title': 'Knowledge Tree',
         'page.subtitle': 'List what you know, group it under themes, then settle it into one tree.',
         'page.foot':
-          'Everything is stored in this browser only (localStorage) and never uploaded. Export a JSON backup before switching devices.',
+          'Saved in this browser (IndexedDB). Only explicit Push uploads to GitHub. Export JSON before clearing browser data.',
         'default.title': 'My knowledge tree',
         'stage.brainstorm': 'List',
         'stage.classify': 'Group',
@@ -267,7 +1281,7 @@ window.__ModuleLoader__.load({
         'page.title': '知识树',
         'page.subtitle': '先一条条列出你知道的，再把它们挂到主题下，最后收成一棵树。',
         'page.foot':
-          '只保存在当前浏览器（localStorage），不上传。换设备或清缓存前请用右上角「导出 → JSON」备份。',
+          '保存在当前浏览器（IndexedDB）；只有主动 Push 才上传 GitHub。清理浏览器数据前请导出 JSON 备份。',
         'default.title': '我的知识树',
         'stage.brainstorm': '列举',
         'stage.classify': '归类',
@@ -1604,33 +2618,13 @@ window.__ModuleLoader__.load({
     /* Store                                                               */
     /* ------------------------------------------------------------------ */
 
-    function createStore() {
+    function createStore(initialRecord, onSave) {
       let data;
       let broken = false;
       let storageError = false;
-      try {
-        let rawText = window.localStorage.getItem(STORAGE_KEY);
-        if (rawText === null) rawText = window.localStorage.getItem(LEGACY_KEY);
-        if (rawText === null) rawText = window.localStorage.getItem(LEGACY_KEY_V1);
-        if (rawText === null) {
-          data = normalizeData(null);
-        } else {
-          let parsed = null;
-          try {
-            parsed = JSON.parse(rawText);
-          } catch (error) {
-            parsed = null;
-            broken = true;
-          }
-          if (parsed === null && broken === false) broken = true;
-          data = normalizeData(parsed);
-        }
-      } catch (error) {
-        data = normalizeData(null);
-        broken = true;
-      }
-
-      let ui = normalizeUi(readJson(UI_KEY), data);
+      if (!initialRecord || typeof onSave !== 'function') throw new Error('A persisted library record and save callback are required.');
+      data = normalizeData(initialRecord.document);
+      let ui = normalizeUi(initialRecord.ui, data);
       let prompts = normalizePrompts(readJson(PROMPTS_KEY));
       const history = [];
       const listeners = new Set();
@@ -1657,34 +2651,28 @@ window.__ModuleLoader__.load({
         listeners.forEach((listener) => listener(snapshot));
       }
 
+      let saveGeneration = 0;
       function persist() {
-        try {
-          window.localStorage.setItem(
-            STORAGE_KEY,
-            JSON.stringify({
-              version: 3,
-              stage: data.stage,
-              title: data.title,
-              cards: data.cards,
-              links: data.links,
-            }),
-          );
-          storageError = false;
-          broken = false;
-          savedAt = Date.now();
-        } catch (error) {
-          storageError = true;
+        if (onSave) {
+          const generation = ++saveGeneration;
           savedAt = null;
+          const document = { version: 3, stage: data.stage, title: data.title, cards: data.cards, links: data.links };
+          Promise.resolve().then(() => onSave(document, structuredClone(ui))).then(() => {
+            if (generation !== saveGeneration) return;
+            storageError = false;
+            savedAt = Date.now();
+            emit();
+          }).catch(() => {
+            if (generation !== saveGeneration) return;
+            storageError = true;
+            savedAt = null;
+            emit();
+          });
+          return;
         }
       }
 
-      function persistUi() {
-        try {
-          window.localStorage.setItem(UI_KEY, JSON.stringify(ui));
-        } catch (error) {
-          /* UI state is a convenience only */
-        }
-      }
+      function persistUi() { persist(); }
 
       function commit(mutator) {
         history.push({
@@ -1769,6 +2757,7 @@ window.__ModuleLoader__.load({
       }
 
       function storageRisk(cards) {
+        if (onSave) return false;
         try {
           return (
             JSON.stringify({
@@ -4662,14 +5651,33 @@ window.__ModuleLoader__.load({
       ctx.effect(() => ctx.locale.register(NS, 'zh', DICT.zh), 'knowledge-tree: Chinese dictionary');
       const translate = ctx.locale.bind(NS);
       const locale = ctx.locale;
-      const store = createStore();
+      const library = createLibrary({ indexedDB: window.indexedDB, legacyStorage: window.localStorage });
+      const { Workspace } = createWorkspaceComponents(React);
+      ctx.effect(() => () => library.close(), 'knowledge-tree: close local library');
+      async function rpc(method, input) {
+        const response = await fetch('/api/knowledge-tree/' + method, {
+          method: 'POST', credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(input || {}),
+        });
+        let payload;
+        try { payload = await response.json(); } catch {
+          throw new Error('知识树 Host 服务尚未就绪；请重新加载插件或重启 DSH。');
+        }
+        if (!response.ok || !payload.ok) throw Object.assign(new Error(payload.error?.message || 'GitHub 操作失败。'), { code: payload.error?.code });
+        return payload.result;
+      }
 
       function KnowledgeIcon(props) {
         return h(PanelGlyph, { size: props.size });
       }
 
       function KnowledgePanel() {
-        return h(KnowledgePage, { store, t: translate, locale });
+        return h(Workspace, {
+          library, rpc, normalizeDocument: normalizeData,
+          createEditor: (record, onSave) => createStore(record, onSave),
+          renderEditor: (store) => h(KnowledgePage, { store, t: translate, locale }),
+        });
       }
 
       ctx.slots.inject('sidebar.panellist', () =>

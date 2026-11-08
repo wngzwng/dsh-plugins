@@ -1,8 +1,12 @@
 {
   "name": "@local/knowledge-tree",
-  "version": "1.5.1",
+  "version": "2.0.0",
+  "scripts": {
+    "build": "node build-client.mjs",
+    "test": "node --test ../tests/knowledge*.test.js ../tests/library.test.js ../tests/workspace-ui.test.js tests/github-sync.test.js"
+  },
   "private": true,
-  "description": "Knowledge Tree for the DeepSeek Harness Web UI: list knowledge cards (title + content), classify them on a self-arranging whiteboard by dragging a card onto its parent, then settle everything into one tree. Local browser storage, Markdown / Mermaid / JSON export.",
+  "description": "Knowledge Tree for DSH: list, classify and grow multiple local knowledge trees, compare GitHub snapshots, and manually Push/Pull with conflict protection. IndexedDB storage and Markdown / Mermaid / JSON export.",
   "type": "module",
   "exports": {
     ".": "./index.js",
@@ -12,7 +16,12 @@
   },
   "files": [
     "index.js",
+    "host-service.js",
+    "github-sync.js",
     "client.js",
+    "library.js",
+    "workspace-ui.js",
+    "build-client.mjs",
     "cordis.patch.yml",
     "locale/*.json",
     "icon.svg",

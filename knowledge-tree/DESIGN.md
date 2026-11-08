@@ -1,7 +1,8 @@
 # 知识树（Knowledge Tree）插件设计
 
-- 状态：**v3 已实现**（2026-11-05，归类语义 + 关系可读性 + 交付闭环）
-- 与现有插件同一套做法：纯前端 bundle、`localStorage`、中英双语、主题 token
+- 状态：**插件 v2.0 GitHub 同步第一版**（2026-11-07）；原编辑器数据格式仍为 v3。
+- 本文 1–11 节保留旧编辑器设计记录；存储/Host 架构已由第 12 节及 README 的 v2.0 说明取代。
+- 现为 Host + Client bundle、IndexedDB 多文档、手动 GitHub API 同步、主题 token。
 
 ## 1. 定位
 
@@ -256,3 +257,14 @@ knowledge-tree/
 - 配图受 localStorage 约 5MB 限制（压缩后 40–300KB/张，约 15–25 张）；写满时该图不保存并提示，
   文字与结构不受影响。不做标注 / 裁剪 / 多图相册。
 - 英文界面是尽力而为的翻译；缺漏或措辞过时不影响中文主流程。
+
+## 12. GitHub 同步第一版（2026-11-07）
+
+- `library.js` 是可独立测试、可嵌入 Client 的 IndexedDB 资料库；locals/remotes/settings/snapshots/meta 独立 stores。旧数据迁移一次性事务，保留所有原键；失败不空树替换。所有本地编辑按 revision CAS 提交。
+- `workspace-ui.js` 在原三阶段编辑器外提供本地多树、远端只读并排查看、手动 Push/Pull。远端缓存与本地文档分离；稳定 treeId 不随文档名变化。
+- `github-sync.js` 为 Node GitHub REST adapter。commit pinned reads；tree.json 权威、tree.md 生成、图片 content-addressed；单 Git tree/commit 与 non-force ref 更新。双方相对 baseHash 改动则拒绝，没有自动 merge/force。
+- `host-service.js` 使用 DSH `connection.fetch.register` 的 `/api/knowledge-tree/*` 精确 POST 路由，继承 owner 认证与 Host/Origin fence；不另起服务器。Token 仅 Host 会话内存或命名环境变量，配置文件不含秘密，错误不泄露远端响应或 Token。
+- `build-client.mjs` 将无依赖 library/UI 的测试源码嵌入现有 Client module loader，不依赖 loader 对相对 import 的支持。修改 library/UI 后必须重新 build。
+- 本地依旧以自包含 data URL 保存配图（未实现 Blob 拆存）；IndexedDB 容量由浏览器管理。默认无远端请求；主动刷新/查看/Pull/Push 才访问 GitHub。
+- 初版只支持已存在的一个仓库与分支、手动同步；不自动创建分支、PR、仓库或定时同步，不实现卡片级冲突裁决与完整三方合并。快照恢复创建无关联新本地副本，原文档不回滚。
+- 测试：GitHub mock API 覆盖竞态、原子提交、损坏/超限拒绝与图片往返；真实 Chrome IndexedDB 覆盖迁移/回滚/CAS/缓存；UI hook harness 覆盖 Push 中编辑、Pull 分叉阻止、离线缓存、恢复与多窗口。

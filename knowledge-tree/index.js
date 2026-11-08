@@ -1,9 +1,10 @@
-/**
- * Host half of the Knowledge Tree bundle.
- *
- * The tree is a browser half (`client.js`) that registers a left-sidebar panel
- * icon and the matching main-column page. This row exists so the bundle is a
- * normal Loader plugin with an inventory entry, display metadata and an icon;
- * it registers no Host service.
- */
-export function apply() {}
+import { createHostService, registerHostRoutes } from './host-service.js';
+
+export const inject = ['connection'];
+
+/** Authenticated owner-only bridge; no GitHub requests happen until a user action. */
+export function apply(ctx) {
+  const service = createHostService();
+  ctx.effect(() => () => service.dispose(), 'knowledge-tree: discard session credential');
+  registerHostRoutes(ctx, service);
+}

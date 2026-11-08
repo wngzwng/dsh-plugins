@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "知识树",
-    "description": "先逐条列举你知道的，再拖动卡片逐条定归属，最后收成一棵知识树。三种视图 + Markdown / Mermaid / JSON 导出，数据只存在本机浏览器。"
+    "description": "先列举、再归类、后成树；支持多棵本地知识树、GitHub 远端只读对照、手动 Push/Pull 与冲突保护。默认本地保存，主动推送才上传。"
   }
 }

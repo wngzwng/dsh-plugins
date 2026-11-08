@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Knowledge Tree",
-    "description": "List what you know, drag each card onto its parent, then settle everything into one tree. Three views plus Markdown / Mermaid / JSON export; data stays in this browser."
+    "description": "List, classify, and grow knowledge trees. Multiple local documents, read-only GitHub comparison, manual Push/Pull, and conflict protection. Local by default; uploads require an explicit Push."
   }
 }
