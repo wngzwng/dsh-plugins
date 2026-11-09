@@ -67,8 +67,16 @@ function sameDeps(a, b) {
   return a.every((value, index) => Object.is(value, b[index]));
 }
 
-function createReact() {
+function createReact(options = {}) {
   const Fragment = Symbol('Fragment');
+  const rect = options.rect || {
+    left: 880,
+    right: 1000,
+    top: 800,
+    bottom: 824,
+    width: 120,
+    height: 24,
+  };
   const instances = new Map();
   let current = null;
   let pendingEffects = [];
@@ -196,12 +204,30 @@ function createReact() {
         children: rendered === null ? [] : [rendered],
       };
     }
-    return {
+    const rendered = {
       type: node.type,
       key: node.key,
       props: node.props || {},
       children: renderChildren(node.children, path),
     };
+    // Minimal DOM-ish surface so refs (dock anchor, menus) behave like refs.
+    rendered.getBoundingClientRect = () => Object.assign({}, rect);
+    rendered.contains = (target) => target === rendered;
+    rendered.focus = () => {
+      if (typeof document !== 'undefined') document.activeElement = rendered;
+    };
+    rendered.click = () => {};
+    rendered.select = () => {};
+    if (
+      node.props !== null &&
+      node.props !== undefined &&
+      node.props.ref !== null &&
+      node.props.ref !== undefined &&
+      typeof node.props.ref === 'object'
+    ) {
+      node.props.ref.current = rendered;
+    }
+    return rendered;
   }
 
   function flushEffects() {
@@ -332,8 +358,8 @@ function harness(options = {}) {
   let uuid = 0;
   globalThis.window = {
     localStorage: storage,
-    innerWidth: 1280,
-    innerHeight: 900,
+    innerWidth: options.innerWidth || 1280,
+    innerHeight: options.innerHeight || 900,
     crypto: { randomUUID: () => 'uuid-' + String(++uuid) },
     setTimeout: () => 1,
     clearTimeout: () => {},
@@ -397,7 +423,7 @@ function harness(options = {}) {
     },
   };
 
-  const { React, render } = createReact();
+  const { React, render } = createReact({ rect: options.rect });
   const definition = DEFINITIONS[0];
   const plugin = definition.factory((id) => {
     if (id === 'react') return React;
@@ -406,6 +432,7 @@ function harness(options = {}) {
   plugin.apply(ctx);
 
   const page = slots.main.component;
+  const dockEntry = slots['conversation.composer.dock'].component;
   const anchors = new Map();
   function anchorFor(title) {
     let anchor = anchors.get(title);
@@ -434,6 +461,10 @@ function harness(options = {}) {
     tree: null,
     render() {
       h.tree = render(React.createElement(page, {}));
+      return h.tree;
+    },
+    renderDock() {
+      h.tree = render(React.createElement(dockEntry, {}));
       return h.tree;
     },
   };
@@ -478,6 +509,19 @@ function harness(options = {}) {
   };
   h.menu = () => h.all('div').find((node) => node.props.role === 'menu');
   h.menuItems = () => h.all('button').filter((node) => node.props.role === 'menuitemradio');
+  h.dockSpan = () =>
+    h.all('span').find((node) => String(node.props.className || '').includes('tdl-dock'));
+  h.dockPopover = () =>
+    h.all('div').find((node) => String(node.props.className || '').includes('tdl-pop'));
+  h.clickDock = () => {
+    const button = h.all('button').find((node) =>
+      String(node.props.className || '').includes('tdl-dock-main'),
+    );
+    assert.ok(button, 'dock main button exists');
+    button.props.onClick();
+    h.renderDock();
+    return button;
+  };
   h.railButton = (label) =>
     h.all('button').find((node) => {
       const className = String(node.props.className || '');
@@ -978,4 +1022,50 @@ test('row focus no longer keeps the delete and empty-date controls visible', () 
   assert.match(css, /\.tdl-del:focus-visible,\.tdl-task-confirming \.tdl-del\{opacity:1\}/);
   assert.doesNotMatch(css, /\.tdl-task:focus-within \.tdl-due-empty/);
   assert.match(css, /\.tdl-due-empty:focus-visible\{opacity:\.7\}/);
+});
+
+test('dock popover is anchored above the trigger instead of viewport-fixed', () => {
+  const h = harness({
+    rect: { left: 880, right: 1000, top: 800, bottom: 824, width: 120, height: 24 },
+  });
+  h.renderDock();
+  h.clickDock();
+  const panel = h.dockPopover();
+  assert.ok(panel, 'dock popover is open');
+  assert.equal(panel.props.style.position, 'absolute');
+  assert.equal(panel.props.style.right, 0);
+  assert.equal(panel.props.style.left, undefined);
+  assert.equal(panel.props.style.bottom, 'calc(100% + 8px)');
+  assert.equal(panel.props.style.width, 320);
+  assert.equal(panel.props.style.maxHeight, 420);
+  const anchored = h.descendants(h.dockSpan(), (node) => node === panel);
+  assert.equal(anchored.length, 1, 'popover lives inside the dock anchor');
+});
+
+test('dock popover flips to left alignment when the trigger is near the left edge', () => {
+  const h = harness({
+    innerWidth: 360,
+    rect: { left: 20, right: 120, top: 300, bottom: 324, width: 100, height: 24 },
+  });
+  h.renderDock();
+  h.clickDock();
+  const panel = h.dockPopover();
+  assert.equal(panel.props.style.position, 'absolute');
+  assert.equal(panel.props.style.left, 0);
+  assert.equal(panel.props.style.right, undefined);
+  assert.equal(panel.props.style.width, 320);
+  assert.equal(panel.props.style.maxHeight, 284);
+});
+
+test('dock popover clamps into a very narrow viewport', () => {
+  const h = harness({
+    innerWidth: 340,
+    rect: { left: 20, right: 150, top: 300, bottom: 324, width: 130, height: 24 },
+  });
+  h.renderDock();
+  h.clickDock();
+  const panel = h.dockPopover();
+  assert.equal(panel.props.style.position, 'absolute');
+  assert.equal(panel.props.style.left, '-12px');
+  assert.equal(panel.props.style.width, 324);
 });

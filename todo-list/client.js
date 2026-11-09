@@ -361,7 +361,7 @@ window.__ModuleLoader__.load({
       '.tdl-dock-overdue{display:inline-flex;align-items:center;height:16px;padding:0 5px;border-radius:999px;background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 12%,transparent);color:var(--dsw-alias-state-error-primary);font-size:10.5px;font-variant-numeric:tabular-nums}',
       '.tdl-dock-add{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;padding:0;border:0;border-radius:999px;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer}',
       '.tdl-dock-add:hover{background:color-mix(in srgb,var(--dsw-alias-label-secondary) 12%,transparent);color:var(--dsw-alias-label-primary)}',
-      '.tdl-pop{box-sizing:border-box;z-index:9998;display:flex;flex-direction:column;padding:10px;border:1px solid var(--dsw-alias-border-l1);border-radius:14px;background:var(--dsw-alias-bg-overlay,var(--dsw-alias-bg-layer-1));color:var(--dsw-alias-label-primary);box-shadow:0 18px 48px color-mix(in srgb,#000 30%,transparent);font-family:inherit;font-size:12.5px;line-height:18px;overflow:auto}',
+      '.tdl-pop{box-sizing:border-box;z-index:9998;display:flex;flex-direction:column;padding:10px;border:1px solid var(--dsw-alias-border-l1);border-radius:14px;background:var(--dsw-alias-bg-overlay,var(--dsw-alias-bg-layer-1));color:var(--dsw-alias-label-primary);box-shadow:0 18px 48px color-mix(in srgb,#000 30%,transparent);font-family:inherit;font-size:12.5px;line-height:18px;white-space:normal;user-select:text;overflow:auto}',
       '.tdl-quick{display:flex;align-items:center;gap:6px;padding:0 0 8px}',
       '.tdl-quick-input{flex:1;min-width:0;height:28px;padding:0 9px;border:.5px solid var(--dsw-alias-border-l1);border-radius:8px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font:inherit;font-size:12px;outline:none}',
       '.tdl-quick-input::placeholder{color:var(--dsw-alias-label-secondary);opacity:.75}',
@@ -2625,6 +2625,37 @@ window.__ModuleLoader__.load({
     /* Dock entry                                                          */
     /* ------------------------------------------------------------------ */
 
+    /*
+     * The docked composer sets `will-change: transform`, so it becomes the
+     * containing block for `position: fixed` descendants. A fixed popover would
+     * therefore be offset by the composer's origin (and end up off-screen).
+     * Anchoring it with `position: absolute` to the dock span keeps it beside
+     * the trigger in every layout, then only the horizontal alignment is chosen
+     * from the measured wrapper rect.
+     */
+    function dockPanelStyle(rect, viewportWidth) {
+      const width = Math.min(320, Math.max(200, viewportWidth - 16));
+      const fitsRight = rect.right - width >= 8;
+      const fitsLeft = rect.left + width <= viewportWidth - 8;
+      const style = {
+        position: 'absolute',
+        bottom: 'calc(100% + 8px)',
+        width,
+        maxHeight: Math.max(180, Math.min(420, rect.top - 16)),
+        zIndex: 9998,
+      };
+      if (fitsRight) {
+        style.right = 0;
+      } else if (fitsLeft) {
+        style.left = 0;
+      } else {
+        style.left = `${Math.round(8 - rect.left)}px`;
+        style.width = Math.max(200, viewportWidth - 16);
+        style.maxHeight = Math.max(120, Math.min(420, rect.top - 16));
+      }
+      return style;
+    }
+
     function DockEntry(props) {
       const { store, t, locale } = props;
       const state = useStoreState(store);
@@ -2736,21 +2767,8 @@ window.__ModuleLoader__.load({
         );
       }
 
-      const panelWidth = Math.min(320, Math.max(200, window.innerWidth - 16));
       const panelStyle =
-        rect === null
-          ? { display: 'none' }
-          : {
-              position: 'fixed',
-              left: Math.min(
-                Math.max(8, rect.left),
-                Math.max(8, window.innerWidth - panelWidth - 8),
-              ),
-              bottom: Math.max(8, window.innerHeight - rect.top + 8),
-              width: panelWidth,
-              maxHeight: Math.max(180, Math.min(420, rect.top - 16)),
-              zIndex: 9998,
-            };
+        rect === null ? { display: 'none' } : dockPanelStyle(rect, window.innerWidth);
 
       return h(
         React.Fragment,
@@ -2797,100 +2815,100 @@ window.__ModuleLoader__.load({
             },
             plusGlyph(13),
           ),
-        ),
-        open && rect !== null
-          ? h(
-              'div',
-              {
-                key: 'panel',
-                ref: panelRef,
-                className: 'tdl-pop',
-                role: 'dialog',
-                'aria-label': t('dock.label'),
-                style: panelStyle,
-              },
-              h(
-                'form',
-                { className: 'tdl-quick', onSubmit: submitQuick },
-                h('input', {
-                  ref: inputRef,
-                  className: 'tdl-quick-input',
-                  type: 'text',
-                  value: title,
-                  placeholder: t('dock.quickPlaceholder'),
-                  'aria-label': t('dock.quickPlaceholder'),
-                  onChange: (event) => setTitle(event.target.value),
-                }),
+          open && rect !== null
+            ? h(
+                'div',
+                {
+                  key: 'panel',
+                  ref: panelRef,
+                  className: 'tdl-pop',
+                  role: 'dialog',
+                  'aria-label': t('dock.label'),
+                  style: panelStyle,
+                },
                 h(
-                  'button',
-                  {
-                    type: 'submit',
-                    className: 'tdl-quick-add',
-                    'aria-label': t('dock.add'),
-                    title: t('dock.add'),
-                  },
-                  plusGlyph(),
+                  'form',
+                  { className: 'tdl-quick', onSubmit: submitQuick },
+                  h('input', {
+                    ref: inputRef,
+                    className: 'tdl-quick-input',
+                    type: 'text',
+                    value: title,
+                    placeholder: t('dock.quickPlaceholder'),
+                    'aria-label': t('dock.quickPlaceholder'),
+                    onChange: (event) => setTitle(event.target.value),
+                  }),
+                  h(
+                    'button',
+                    {
+                      type: 'submit',
+                      className: 'tdl-quick-add',
+                      'aria-label': t('dock.add'),
+                      title: t('dock.add'),
+                    },
+                    plusGlyph(),
+                  ),
                 ),
-              ),
-              h(
-                'div',
-                { className: 'tdl-panel-head' },
-                h('span', { className: 'tdl-panel-title' }, t('dock.todayTitle')),
-                h('span', { className: 'tdl-panel-sub' }, t('dock.today', {
-                  done: doneTasks.length,
-                  total,
-                })),
-              ),
-              overdueTasks.length > 0
-                ? h(
-                    'div',
-                    { className: 'tdl-panel-section' },
-                    h(
+                h(
+                  'div',
+                  { className: 'tdl-panel-head' },
+                  h('span', { className: 'tdl-panel-title' }, t('dock.todayTitle')),
+                  h('span', { className: 'tdl-panel-sub' }, t('dock.today', {
+                    done: doneTasks.length,
+                    total,
+                  })),
+                ),
+                overdueTasks.length > 0
+                  ? h(
                       'div',
-                      {
-                        className:
-                          'tdl-panel-section-title tdl-panel-section-title-warn',
-                      },
-                      h('span', null, t('dock.overdueTitle')),
-                      h('span', null, String(overdueTasks.length)),
-                    ),
-                    overdueTasks.map((task) => panelTaskRow(task, 'overdue')),
-                  )
-                : null,
-              h(
-                'div',
-                { className: 'tdl-panel-section' },
-                todayTasks.length > 0
-                  ? todayTasks.map((task) => panelTaskRow(task, 'today'))
-                  : h('p', { className: 'tdl-panel-empty' }, t('dock.emptyToday')),
-              ),
-              doneTasks.length > 0
-                ? h(
-                    React.Fragment,
-                    null,
-                    h(
-                      'button',
-                      {
-                        type: 'button',
-                        className: 'tdl-panel-done-toggle',
-                        onClick: () => setShowDone((value) => !value),
-                        'aria-expanded': showDone,
-                      },
-                      showDone ? '▾' : '▸',
-                      t('dock.doneToday', { count: doneTasks.length }),
-                    ),
-                    showDone
-                      ? h(
-                          'div',
-                          { className: 'tdl-panel-section' },
-                          doneTasks.map((task) => panelTaskRow(task, 'done')),
-                        )
-                      : null,
-                  )
-                : null,
-              h('div', { className: 'tdl-panel-foot' }, t('dock.footer')),
-            )
-          : null,
+                      { className: 'tdl-panel-section' },
+                      h(
+                        'div',
+                        {
+                          className:
+                            'tdl-panel-section-title tdl-panel-section-title-warn',
+                        },
+                        h('span', null, t('dock.overdueTitle')),
+                        h('span', null, String(overdueTasks.length)),
+                      ),
+                      overdueTasks.map((task) => panelTaskRow(task, 'overdue')),
+                    )
+                  : null,
+                h(
+                  'div',
+                  { className: 'tdl-panel-section' },
+                  todayTasks.length > 0
+                    ? todayTasks.map((task) => panelTaskRow(task, 'today'))
+                    : h('p', { className: 'tdl-panel-empty' }, t('dock.emptyToday')),
+                ),
+                doneTasks.length > 0
+                  ? h(
+                      React.Fragment,
+                      null,
+                      h(
+                        'button',
+                        {
+                          type: 'button',
+                          className: 'tdl-panel-done-toggle',
+                          onClick: () => setShowDone((value) => !value),
+                          'aria-expanded': showDone,
+                        },
+                        showDone ? '▾' : '▸',
+                        t('dock.doneToday', { count: doneTasks.length }),
+                      ),
+                      showDone
+                        ? h(
+                            'div',
+                            { className: 'tdl-panel-section' },
+                            doneTasks.map((task) => panelTaskRow(task, 'done')),
+                          )
+                        : null,
+                    )
+                  : null,
+                h('div', { className: 'tdl-panel-foot' }, t('dock.footer')),
+              )
+            : null,
+        ),
       );
     }
 
