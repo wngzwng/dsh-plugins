@@ -917,3 +917,55 @@ test('hovering a rail group clears the row reorder indicator', () => {
   h.dragOverRail('生活');
   assert.doesNotMatch(String(h.row('约牙医').props.className), /tdl-drop-(before|after)/);
 });
+
+test('a single click no longer renames; double click edits and saves', () => {
+  const h = harness();
+  h.render();
+  const titleSpan = () =>
+    h
+      .descendants(
+        h.row('写周报'),
+        (node) => node.type === 'span' && String(node.props.className || '').includes('tdl-task-title'),
+      )
+      .at(0);
+  const titleInput = () =>
+    h.all('input').find((node) => node.props.className === 'tdl-title-input');
+
+  assert.ok(titleSpan(), 'title span exists');
+  assert.equal(titleSpan().props.onClick, undefined, 'single click has no rename handler');
+  assert.equal(titleInput(), undefined, 'nothing is being edited yet');
+
+  titleSpan().props.onDoubleClick();
+  h.render();
+  const input = titleInput();
+  assert.ok(input, 'double click opens the inline editor');
+  assert.equal(input.props.value, '写周报');
+
+  input.props.onChange({ target: { value: '写周报（改）' } });
+  h.render();
+  titleInput().props.onBlur();
+  h.render();
+  assert.equal(h.task('t1').title, '写周报（改）');
+  assert.equal(titleInput(), undefined);
+  assert.match(h.text(), /写周报（改）/);
+});
+
+test('keyboard Enter on the focused title still starts editing', () => {
+  const h = harness();
+  h.render();
+  const titleSpan = h
+    .descendants(
+      h.row('写周报'),
+      (node) => node.type === 'span' && String(node.props.className || '').includes('tdl-task-title'),
+    )
+    .at(0);
+  titleSpan.props.onKeyDown({
+    key: 'Enter',
+    preventDefault() {},
+    nativeEvent: { isComposing: false },
+  });
+  h.render();
+  const input = h.all('input').find((node) => node.props.className === 'tdl-title-input');
+  assert.ok(input, 'Enter opens the inline editor');
+  assert.equal(input.props.value, '写周报');
+});

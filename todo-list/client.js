@@ -72,6 +72,7 @@ window.__ModuleLoader__.load({
         'task.complete': 'Mark as done',
         'task.uncomplete': 'Mark as not done',
         'task.editTitle': 'Edit title',
+        'task.editTitleHint': 'Double-click to edit',
         'task.addDue': 'Date',
         'task.setDue': 'Set due date',
         'task.dueValue': 'Due {value}',
@@ -178,6 +179,7 @@ window.__ModuleLoader__.load({
         'task.complete': '标记完成',
         'task.uncomplete': '标记未完成',
         'task.editTitle': '编辑标题',
+        'task.editTitleHint': '双击编辑',
         'task.addDue': '日期',
         'task.setDue': '设置截止日期',
         'task.dueValue': '截止日期：{value}',
@@ -1428,14 +1430,14 @@ window.__ModuleLoader__.load({
                 className: 'tdl-task-title',
                 role: 'button',
                 tabIndex: 0,
-                onClick: startEditing,
+                onDoubleClick: startEditing,
                 onKeyDown: (event) => {
                   if (event.key === 'Enter' || event.key === ' ') {
                     event.preventDefault();
                     startEditing();
                   }
                 },
-                title: t('task.editTitle'),
+                title: t('task.editTitleHint'),
               },
               task.title,
             ),
