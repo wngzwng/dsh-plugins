@@ -546,7 +546,7 @@ function createStore({ storage, uuid, now })
 10. **样式与测试**：UI 片段各自持有 `FULL_PANEL_CSS`/`QUICK_PICKER_CSS`，骨架注入一个
    `data-dsh-plugin="prompt-library"` 的 `<style>` 并随卸载移除；测试用
    `tests/helpers/prompt-library-harness.js` 的假 React/portal/document/locale/fetch 渲染真实
-   组件树。当前测试：提示库 218 项（core 47、host 28、capture-core 30、panel 42、quick 36、integration 35）；整仓库回归会受工作区中 knowledge-tree 在建改动影响，提示库套件独立全绿。
+   组件树。当前测试：提示库 220 项（core 47、host 28、capture-core 30、panel 42、quick 36、integration 37）；整仓库回归会受工作区中 knowledge-tree 在建改动影响，提示库套件独立全绿。
 
 ## 9. 快速收录（quick capture）实现契约 v1（2026-11 增补）
 
@@ -675,6 +675,10 @@ AI 辅助整理/改写（可选增强，不在首版）；来源消息精确跳�
 1. 收录弹层由 `src/capture.js` 的共享 `PromptLibraryCaptureHost` 承载（root `shell.overlay`），
    入口只调用 `capture.open({text, source})`；已打开时 `open()` 返回 false，不覆盖未保存内容。
 2. 「继续收录」除正文/标题/标签/场景/来源说明外，来源类型也重置为 `paste`（不继承上一条来源会话）。
+标题字段展示「自动生成 / 已手动修改」状态，手动修改后正文变化不覆盖标题；标题旁常驻「自动生成」
+按钮，点击先二次确认再替换为当前正文的自动建议（保留当前标题可取消），已是自动标题时禁用；
+清空标题时输入框保持为空（不会把刚删掉的最后一个字符自动填回），保存时仍用自动建议，
+两种方式都不会改动正文或已选标签。
 3. 保存入口使用同步 `savingRef` 防抖，快速双击只创建一条；保存失败保留全部字段并允许重试。
 4. 收件箱计数/过滤由 `selectPrompts({view:'inbox'})` 统一实现；整理切换 `setOrganize` 不修改
    `updatedAt`/`bodyVersion`/正文。

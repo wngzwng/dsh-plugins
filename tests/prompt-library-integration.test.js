@@ -536,9 +536,73 @@ test('automatic titles stay within 40 visible characters and never overwrite man
   h.change(h.findInput('提示词标题'), '');
   assert.equal(
     h.findInput('提示词标题').props.value,
-    '新的正文第一行',
-    'clearing the title resumes the automatic suggestion',
+    '',
+    'a cleared title stays empty so the last character can be deleted',
   );
+  h.change(h.findTextarea('提示词正文'), '清空后的正文第一行');
+  assert.equal(
+    h.findInput('提示词标题').props.value,
+    '清空后的正文第一行',
+    'an untouched empty title follows the body suggestion again',
+  );
+  h.dispose();
+});
+
+test('the last title character can be deleted without the auto title snapping back', async () => {
+  const h = harness();
+  openQuickCapture(h);
+  h.change(h.findTextarea('提示词正文'), '正文第一行\n正文内容');
+  assert.equal(h.findInput('提示词标题').props.value, '正文第一行');
+
+  h.change(h.findInput('提示词标题'), '好');
+  h.change(h.findInput('提示词标题'), '');
+  assert.equal(h.findInput('提示词标题').props.value, '', 'empty field stays empty while editing');
+  assert.match(h.text(), /自动生成/, 'empty title is still understood as auto');
+
+  // Saving with an empty field falls back to the suggestion.
+  h.clickButton('收录');
+  await h.flush();
+  assert.equal(h.prompts().length, 1);
+  assert.equal(h.prompts()[0].title, '正文第一行');
+  h.dispose();
+});
+
+test('manual titles can be reverted to the automatic suggestion after confirmation', () => {
+  const h = harness();
+  openQuickCapture(h);
+  h.change(h.findTextarea('提示词正文'), '自动标题行\n正文内容');
+
+  assert.equal(h.findInput('提示词标题').props.value, '自动标题行');
+  assert.match(h.text(), /自动生成/, 'auto-generated state is labelled');
+  const alreadyAuto = h.buttonByLabel('自动生成');
+  assert.ok(alreadyAuto, 'the manual auto-title action is always next to the field');
+  assert.equal(alreadyAuto.props.disabled, true, 'disabled while the title is already the suggestion');
+
+  h.change(h.findInput('提示词标题'), '手写标题');
+  assert.match(h.text(), /已手动修改/, 'manual edit is labelled');
+  assert.equal(h.buttonByLabel('自动生成').props.disabled, false, 'action enabled after a manual edit');
+
+  // First click only opens the confirmation; cancelling keeps the manual title.
+  h.clickButton('自动生成');
+  assert.match(h.text(), /用自动生成的标题替换/);
+  h.clickButton('保留当前标题');
+  assert.equal(h.findInput('提示词标题').props.value, '手写标题', 'cancel keeps the manual title');
+
+  // Manual edits keep winning while the body changes.
+  h.change(h.findTextarea('提示词正文'), '改过的第一行\n正文');
+  assert.equal(h.findInput('提示词标题').props.value, '手写标题', 'manual title is not overwritten');
+
+  // Confirmation names the current suggestion, then replaces.
+  h.clickButton('自动生成');
+  assert.match(h.text(), /改过的第一行/);
+  h.clickButton('替换');
+  assert.equal(h.findInput('提示词标题').props.value, '改过的第一行', 'reverts to the current suggestion');
+  assert.equal(h.buttonByLabel('自动生成').props.disabled, true);
+  assert.match(h.text(), /自动生成/);
+
+  // After restoring, the title follows the body again.
+  h.change(h.findTextarea('提示词正文'), '第三行\n正文');
+  assert.equal(h.findInput('提示词标题').props.value, '第三行', 'auto suggestion resumes');
   h.dispose();
 });
 

@@ -1904,7 +1904,15 @@ const CAPTURE_DICT = {
     'capture.titleLabel': '标题',
     'capture.titlePlaceholder': '留空将根据正文自动生成',
     'capture.titleAria': '提示词标题',
-    'capture.autoTitleHint': '未填写标题时，自动使用正文首个非空行（最多 40 个可见字符）。',
+    'capture.autoTitleHint': '标题可直接改写；留空或点「恢复自动标题」时，使用正文首个非空行（最多 40 个可见字符）。',
+    'capture.titleAutoBadge': '自动生成',
+    'capture.titleManualBadge': '已手动修改',
+    'capture.autoTitleButton': '自动生成',
+    'capture.autoTitleButtonTitle': '用根据正文生成的标题替换当前标题（会先确认）',
+    'capture.autoTitleConfirmTitle': '用自动生成的标题替换？',
+    'capture.autoTitleConfirmBody': '将把当前标题替换为「{title}」。此操作不会改动正文。',
+    'capture.autoTitleReplace': '替换',
+    'capture.autoTitleCancel': '保留当前标题',
     'capture.tagsLabel': '标签',
     'capture.tagsEmpty': '还没有标签，可稍后在提示库中创建并整理。',
     'capture.more': '更多选项',
@@ -1956,7 +1964,15 @@ const CAPTURE_DICT = {
     'capture.titleLabel': 'Title',
     'capture.titlePlaceholder': 'Leave empty to generate from the text',
     'capture.titleAria': 'Prompt title',
-    'capture.autoTitleHint': 'Without a title, the first non-empty line is used (up to 40 visible characters).',
+    'capture.autoTitleHint': 'The title is editable; clear it or choose "Restore suggested title" to use the first non-empty line (up to 40 visible characters).',
+    'capture.titleAutoBadge': 'Auto',
+    'capture.titleManualBadge': 'Edited',
+    'capture.autoTitleButton': 'Auto title',
+    'capture.autoTitleButtonTitle': 'Replace the current title with the one generated from the text (asks first)',
+    'capture.autoTitleConfirmTitle': 'Replace with the generated title?',
+    'capture.autoTitleConfirmBody': 'The current title will be replaced with \"{title}\". The prompt text is not changed.',
+    'capture.autoTitleReplace': 'Replace',
+    'capture.autoTitleCancel': 'Keep current title',
     'capture.tagsLabel': 'Tags',
     'capture.tagsEmpty': 'No tags yet; create and organize them in the library later.',
     'capture.more': 'More options',
@@ -2007,6 +2023,14 @@ const CAPTURE_CSS = [
   '.pl-capture-target{display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:12.3px;color:var(--dsw-alias-label-secondary)}',
   '.pl-capture-target strong{color:var(--dsw-alias-label-primary);font-weight:600}',
   '.pl-capture-body{min-height:160px;max-height:38vh}',
+  '.pl-capture-title-label{display:flex;align-items:center;gap:6px}',
+  '.pl-capture-title-state{padding:1px 7px;border-radius:999px;background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-secondary);font-size:10.5px;line-height:1.6;font-weight:400}',
+  '.pl-capture-title-state[data-title-state="manual"]{background:color-mix(in srgb,var(--dsw-alias-state-warn-primary,#d4a72c) 14%,transparent);color:var(--dsw-alias-state-warn-primary,#d4a72c)}',
+  '.pl-capture-auto-title{flex:none;font-size:12px}',
+  '.pl-capture-auto-title:disabled{opacity:.5;cursor:not-allowed}',
+  '.pl-capture-title-confirm{display:flex;flex-direction:column;gap:6px;margin-top:6px;padding:8px 10px;border:.5px solid color-mix(in srgb,var(--dsw-alias-state-warn-primary,#d4a72c) 35%,transparent);border-radius:9px;background:color-mix(in srgb,var(--dsw-alias-state-warn-primary,#d4a72c) 10%,transparent)}',
+  '.pl-capture-title-confirm-text{margin:0;font-size:12.5px;font-weight:600;color:var(--dsw-alias-label-primary)}',
+  '.pl-capture-title-confirm-actions{display:flex;flex-wrap:wrap;gap:8px}',
   '.pl-capture-title-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px}',
   '.pl-capture-title-row .pl-input{flex:1;min-width:180px}',
   '.pl-capture-field-error{margin:4px 0 0;color:var(--dsw-alias-state-error-primary,#b3261e);font-size:12px}',
@@ -2134,6 +2158,7 @@ function PromptLibraryCaptureDialog(props) {
   const [preview, setPreview] = React.useState(null);
   const [saved, setSaved] = React.useState(null);
   const [discardOpen, setDiscardOpen] = React.useState(false);
+  const [autoTitleConfirmOpen, setAutoTitleConfirmOpen] = React.useState(false);
   const bodyRef = React.useRef(null);
   const composingRef = React.useRef(false);
   const resetFocusRef = React.useRef(0);
@@ -2164,6 +2189,10 @@ function PromptLibraryCaptureDialog(props) {
 
   const data = store.getSnapshot().data;
   const tags = sortTags(data.tags);
+  /* The auto suggestion is derived from the body so manual edits can be
+   * reverted at any time without losing the current text. */
+  const autoTitle = suggestCaptureTitle(body);
+  const autoTitleDisabled = autoTitle === '' || title === autoTitle;
   const hasContent = Boolean(
     body.trim() || title.trim() || usage.trim() || sourceNote.trim() || tagIds.length,
   );
@@ -2200,12 +2229,23 @@ function PromptLibraryCaptureDialog(props) {
   function onTitleChange(event) {
     const value = event && event.target ? event.target.value : '';
     setTitle(value);
-    if (value.trim() === '') {
-      setTitleDirty(false);
-      setTitle(suggestCaptureTitle(body));
-    } else {
-      setTitleDirty(true);
-    }
+    /* Never refill the auto suggestion while the field is empty: doing that
+     * made the last character impossible to delete (it came straight back).
+     * An empty title simply means "use the suggestion" at save time, and a
+     * later body edit may refill it while the field is still untouched. */
+    setTitleDirty(value.trim() !== '');
+    setAutoTitleConfirmOpen(false);
+  }
+
+  function requestAutoTitle() {
+    if (autoTitleDisabled) return;
+    setAutoTitleConfirmOpen(true);
+  }
+
+  function applyAutoTitle() {
+    setTitle(autoTitle);
+    setTitleDirty(false);
+    setAutoTitleConfirmOpen(false);
   }
 
   function toggleTag(tagId) {
@@ -2352,17 +2392,80 @@ function PromptLibraryCaptureDialog(props) {
   const titleField = h(
     'div',
     { className: 'pl-field' },
-    h('label', { className: 'pl-label' }, t('capture.titleLabel')),
-    h('input', {
-      type: 'text',
-      className: 'pl-input',
-      'aria-label': t('capture.titleAria'),
-      placeholder: t('capture.titlePlaceholder'),
-      value: title,
-      onChange: onTitleChange,
-      onKeyDown,
-    }),
+    h(
+      'div',
+      { className: 'pl-capture-title-label' },
+      h('label', { className: 'pl-label' }, t('capture.titleLabel')),
+      autoTitle
+        ? h(
+            'span',
+            { className: 'pl-capture-title-state', 'data-title-state': titleDirty ? 'manual' : 'auto' },
+            t(titleDirty ? 'capture.titleManualBadge' : 'capture.titleAutoBadge'),
+          )
+        : null,
+    ),
+    h(
+      'div',
+      { className: 'pl-capture-title-row' },
+      h('input', {
+        type: 'text',
+        className: 'pl-input',
+        'aria-label': t('capture.titleAria'),
+        placeholder: t('capture.titlePlaceholder'),
+        value: title,
+        onChange: onTitleChange,
+        onKeyDown,
+      }),
+      autoTitle
+        ? h(
+            'button',
+            {
+              type: 'button',
+              className: 'pl-btn pl-btn-ghost pl-capture-auto-title',
+              title: t('capture.autoTitleButtonTitle'),
+              'aria-label': t('capture.autoTitleButton'),
+              disabled: autoTitleDisabled,
+              onClick: requestAutoTitle,
+            },
+            t('capture.autoTitleButton'),
+          )
+        : null,
+    ),
     h('p', { className: 'pl-field-hint' }, t('capture.autoTitleHint')),
+    autoTitleConfirmOpen
+      ? h(
+          'div',
+          {
+            className: 'pl-capture-title-confirm',
+            role: 'alertdialog',
+            'aria-label': t('capture.autoTitleConfirmTitle'),
+          },
+          h('p', { className: 'pl-capture-title-confirm-text' }, t('capture.autoTitleConfirmTitle')),
+          h(
+            'p',
+            { className: 'pl-capture-sub' },
+            t('capture.autoTitleConfirmBody', { title: autoTitle }),
+          ),
+          h(
+            'div',
+            { className: 'pl-capture-title-confirm-actions' },
+            h(
+              'button',
+              { type: 'button', className: 'pl-btn pl-btn-primary', onClick: applyAutoTitle },
+              t('capture.autoTitleReplace'),
+            ),
+            h(
+              'button',
+              {
+                type: 'button',
+                className: 'pl-btn',
+                onClick: () => setAutoTitleConfirmOpen(false),
+              },
+              t('capture.autoTitleCancel'),
+            ),
+          ),
+        )
+      : null,
   );
 
   const tagsField = h(
