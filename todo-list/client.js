@@ -63,10 +63,12 @@ window.__ModuleLoader__.load({
         'group.deleteConfirm': 'Delete group',
         'group.cancel': 'Cancel',
         'group.save': 'Save',
+        'group.menuTitle': 'Move to group',
         'add.placeholder': 'Add a task, press Enter',
         'add.group': 'Group',
         'add.submit': 'Add',
-        'task.drag': 'Drag to reorder',
+        'task.drag': 'Drag to reorder, or drop on a group',
+        'task.groupValue': 'Group: {name}. Click to move.',
         'task.complete': 'Mark as done',
         'task.uncomplete': 'Mark as not done',
         'task.editTitle': 'Edit title',
@@ -102,6 +104,7 @@ window.__ModuleLoader__.load({
         'notice.imported': 'Imported: {added} added, {updated} updated, {skipped} skipped',
         'notice.importFailed': 'Import failed: this file is not a To-do List backup',
         'notice.clearedDone': 'Cleared {count} completed task(s)',
+        'notice.moved': 'Moved to {name}',
         'notice.storageUnavailable':
           'Local storage is unavailable — changes stay in memory only.',
         'notice.loadFailed':
@@ -128,7 +131,7 @@ window.__ModuleLoader__.load({
           'Click “To-do” or “+”, type a task and press Enter. Quick-added tasks land in Inbox, due today. Overdue and today rows can be ticked right in the popover.',
         'help.pageTitle': '2 · Arrange on the full page',
         'help.pageBody':
-          'Pick a group, then set a due date, cycle the priority bars, drag the handle to reorder, and use the Today / Overdue filters to focus. The Done tab can clear finished tasks.',
+          'Pick a group, then set a due date, cycle the priority bars, drag the handle to reorder, and use the Today / Overdue filters to focus. To move a task to another group, click its group chip — or drag it onto a group in the left rail. The Done tab can clear finished tasks.',
         'help.dataTitle': 'Where the data lives',
         'help.data':
           'Everything is stored in this browser only (localStorage) and never uploaded. Export a JSON backup before switching devices or clearing site data; import merges by task id and never deletes local tasks.',
@@ -166,10 +169,12 @@ window.__ModuleLoader__.load({
         'group.deleteConfirm': '删除分组',
         'group.cancel': '取消',
         'group.save': '保存',
+        'group.menuTitle': '移动到分组',
         'add.placeholder': '添加待办，回车保存',
         'add.group': '分组',
         'add.submit': '添加',
-        'task.drag': '拖动排序',
+        'task.drag': '拖动排序，或拖到分组上',
+        'task.groupValue': '分组：{name}，点击切换',
         'task.complete': '标记完成',
         'task.uncomplete': '标记未完成',
         'task.editTitle': '编辑标题',
@@ -205,6 +210,7 @@ window.__ModuleLoader__.load({
         'notice.imported': '导入完成：新增 {added} 条，更新 {updated} 条，跳过 {skipped} 条',
         'notice.importFailed': '导入失败：这不是待办清单的备份文件',
         'notice.clearedDone': '已清空 {count} 条已完成任务',
+        'notice.moved': '已移到「{name}」',
         'notice.storageUnavailable': '本机存储不可用，改动只保留在内存中。',
         'notice.loadFailed': '本机数据读取失败，已从空清单开始；原数据未被覆盖。',
         'empty.all': '还没有任务，从上面添加第一条。',
@@ -229,7 +235,7 @@ window.__ModuleLoader__.load({
           '点「待办」或「＋」，输入内容回车即添加为「今天」到期的收件箱任务。弹层里可以直接勾掉今天和过期的任务。',
         'help.pageTitle': '2 · 整页安排',
         'help.pageBody':
-          '选分组后，点日期设截止日、点优先级色条切换高低、拖动左侧手柄排序，再用「今天 / 过期」筛选聚焦。已完成的任务可在「已完成」里一键清空。',
+          '选分组后，点日期设截止日、点优先级色条切换高低、拖动左侧手柄排序，再用「今天 / 过期」筛选聚焦。要换分组，点任务上的分组徽标，或把它拖到左侧栏的分组上。已完成的任务可在「已完成」里一键清空。',
         'help.dataTitle': '数据存在哪',
         'help.data':
           '只保存在当前浏览器（localStorage），不上传。换设备或清缓存前请用右上角「导出 JSON」备份；导入按任务 id 合并，不会删除本机任务。',
@@ -255,7 +261,7 @@ window.__ModuleLoader__.load({
       '.tdl-head-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px}',
       '.tdl-icon-btn{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;padding:0;border:.5px solid var(--dsw-alias-border-l1);border-radius:9px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-secondary);cursor:pointer;transition:background .15s,color .15s}',
       '.tdl-icon-btn:hover{background:var(--dsw-alias-interactive-bg-hover,color-mix(in srgb,var(--dsw-alias-label-secondary) 10%,transparent));color:var(--dsw-alias-label-primary)}',
-      '.tdl-icon-btn:focus-visible,.tdl-dock-main:focus-visible,.tdl-dock-add:focus-visible,.tdl-filter:focus-visible,.tdl-rail-item:focus-visible,.tdl-rail-add:focus-visible,.tdl-rail-edit:focus-visible,.tdl-btn:focus-visible,.tdl-text-btn:focus-visible,.tdl-del:focus-visible,.tdl-priority:focus-visible,.tdl-due:focus-visible,.tdl-panel-done-toggle:focus-visible,.tdl-quick input:focus-visible,.tdl-add-input:focus-visible,.tdl-title-input:focus-visible,.tdl-date-input:focus-visible,.tdl-dialog input:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}',
+      '.tdl-icon-btn:focus-visible,.tdl-dock-main:focus-visible,.tdl-dock-add:focus-visible,.tdl-filter:focus-visible,.tdl-rail-item:focus-visible,.tdl-rail-add:focus-visible,.tdl-rail-edit:focus-visible,.tdl-btn:focus-visible,.tdl-text-btn:focus-visible,.tdl-del:focus-visible,.tdl-priority:focus-visible,.tdl-due:focus-visible,.tdl-group-badge:focus-visible,.tdl-groupmenu-item:focus-visible,.tdl-panel-done-toggle:focus-visible,.tdl-quick input:focus-visible,.tdl-add-input:focus-visible,.tdl-title-input:focus-visible,.tdl-date-input:focus-visible,.tdl-dialog input:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}',
       '.tdl-body{display:flex;align-items:flex-start;gap:18px;margin-top:6px}',
       '.tdl-rail{flex:none;width:190px;display:flex;flex-direction:column;gap:2px;padding-top:2px}',
       '.tdl-rail-row{position:relative;display:flex;align-items:center}',
@@ -264,6 +270,8 @@ window.__ModuleLoader__.load({
       '.tdl-rail-item:hover{background:var(--dsw-alias-interactive-bg-hover,color-mix(in srgb,var(--dsw-alias-label-secondary) 9%,transparent))}',
       '.tdl-rail-item-active{background:color-mix(in srgb,var(--dsw-alias-brand-primary) 11%,transparent);color:var(--dsw-alias-brand-primary)}',
       '.tdl-rail-item-active:hover{background:color-mix(in srgb,var(--dsw-alias-brand-primary) 15%,transparent)}',
+      '.tdl-rail-item-drop,.tdl-rail-item-drop:hover{background:color-mix(in srgb,var(--dsw-alias-brand-primary) 16%,transparent);box-shadow:inset 0 0 0 1.5px var(--dsw-alias-brand-primary);color:var(--dsw-alias-brand-primary)}',
+      '.tdl-rail-item-drop .tdl-rail-count{color:var(--dsw-alias-brand-primary)}',
       '.tdl-rail-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
       '.tdl-rail-count{flex:none;min-width:16px;text-align:right;font-size:11px;color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums}',
       '.tdl-rail-item-active .tdl-rail-count{color:var(--dsw-alias-brand-primary)}',
@@ -305,7 +313,15 @@ window.__ModuleLoader__.load({
       '.tdl-task-title{flex:1;min-width:0;font-size:13.5px;line-height:20px;overflow-wrap:anywhere;cursor:text;border-radius:4px}',
       '.tdl-title-input{flex:1;min-width:0;height:26px;padding:0 6px;border:.5px solid var(--dsw-alias-brand-primary);border-radius:7px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font:inherit;font-size:13.5px;outline:none}',
       '.tdl-meta{flex:none;display:inline-flex;align-items:center;gap:2px}',
-      '.tdl-group-badge{height:16px;padding:0 6px;border-radius:999px;background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-secondary);font-size:10.5px;line-height:16px;white-space:nowrap}',
+      '.tdl-group-badge{max-width:96px;height:17px;padding:0 6px;border:0;border-radius:999px;background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-secondary);font:inherit;font-size:10.5px;line-height:17px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer}',
+      '.tdl-group-badge:hover{background:color-mix(in srgb,var(--dsw-alias-brand-primary) 14%,transparent);color:var(--dsw-alias-brand-primary)}',
+      '.tdl-pop.tdl-groupmenu{gap:2px;padding:8px}',
+      '.tdl-groupmenu .tdl-panel-section-title{padding:2px 6px 5px}',
+      '.tdl-groupmenu-item{display:flex;flex:none;align-items:center;gap:7px;height:30px;padding:0 7px;border:0;border-radius:7px;background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:12.5px;text-align:left;cursor:pointer}',
+      '.tdl-groupmenu-item:hover{background:var(--dsw-alias-interactive-bg-hover,color-mix(in srgb,var(--dsw-alias-label-secondary) 10%,transparent))}',
+      '.tdl-groupmenu-item[aria-checked=true]{background:color-mix(in srgb,var(--dsw-alias-brand-primary) 11%,transparent);color:var(--dsw-alias-brand-primary)}',
+      '.tdl-groupmenu-check{flex:none;display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px}',
+      '.tdl-groupmenu-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
       '.tdl-due{display:inline-flex;align-items:center;gap:3px;height:20px;padding:0 6px;border:.5px solid transparent;border-radius:6px;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:11px;line-height:1;white-space:nowrap;cursor:pointer;font-variant-numeric:tabular-nums}',
       '.tdl-due:hover{background:color-mix(in srgb,var(--dsw-alias-label-secondary) 9%,transparent);color:var(--dsw-alias-label-primary)}',
       '.tdl-due-overdue,.tdl-due-overdue:hover{color:var(--dsw-alias-state-error-primary);background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 9%,transparent)}',
@@ -389,7 +405,7 @@ window.__ModuleLoader__.load({
       '.tdl-help-step h3{margin:0 0 2px;font-size:12.5px;font-weight:600;line-height:18px}',
       '.tdl-help-step p{margin:0;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary)}',
       '.tdl-help-note{margin:8px 0 0;padding-top:8px;border-top:.5px solid var(--dsw-alias-border-l1);font-size:11.5px;line-height:17px;color:var(--dsw-alias-label-secondary)}',
-      '@media (max-width:720px){.tdl-body{flex-direction:column;gap:8px}.tdl-rail{width:100%;flex-direction:row;align-items:center;gap:4px;overflow-x:auto;padding-bottom:2px}.tdl-rail-row{flex:none}.tdl-rail-row .tdl-rail-item{flex:none;height:30px;padding:0 10px;border:.5px solid var(--dsw-alias-border-l1)}.tdl-rail-edit{position:static;opacity:1;width:22px}.tdl-rail-add{flex:none;margin-top:0;height:30px}.tdl-group-badge{display:none}.tdl-meta{gap:1px}}',
+      '@media (max-width:720px){.tdl-body{flex-direction:column;gap:8px}.tdl-rail{width:100%;flex-direction:row;align-items:center;gap:4px;overflow-x:auto;padding-bottom:2px}.tdl-rail-row{flex:none}.tdl-rail-row .tdl-rail-item{flex:none;height:30px;padding:0 10px;border:.5px solid var(--dsw-alias-border-l1)}.tdl-rail-edit{position:static;opacity:1;width:22px}.tdl-rail-add{flex:none;margin-top:0;height:30px}.tdl-group-badge{max-width:110px;height:24px;padding:0 8px;font-size:11px;line-height:24px}.tdl-meta{gap:1px}}',
     ].join('');
 
     /* ------------------------------------------------------------------ */
@@ -515,7 +531,15 @@ window.__ModuleLoader__.load({
       const groups = [];
       source.forEach((item, index) => {
         if (item === null || typeof item !== 'object') return;
-        if (typeof item.id !== 'string' || item.id === '' || BUILTIN_IDS.has(item.id)) return;
+        // `all` is the synthetic "every group" view, never a real group id.
+        if (
+          typeof item.id !== 'string' ||
+          item.id === '' ||
+          item.id === 'all' ||
+          BUILTIN_IDS.has(item.id)
+        ) {
+          return;
+        }
         if (seenIds.has(item.id)) return;
         const name = typeof item.name === 'string' ? item.name.trim() : '';
         if (name === '' || [...name].length > MAX_GROUP_NAME) return;
@@ -774,6 +798,19 @@ window.__ModuleLoader__.load({
         emit();
       }
 
+      function moveTaskToGroup(id, groupId) {
+        const task = data.tasks.find((item) => item.id === id);
+        if (task === undefined || !groupExists(groupId) || task.groupId === groupId) {
+          return false;
+        }
+        const targetOrders = data.tasks
+          .filter((item) => item.groupId === groupId)
+          .map((item) => item.order);
+        const order = targetOrders.length > 0 ? Math.max.apply(null, targetOrders) + 1 : 0;
+        updateTask(id, { groupId, order });
+        return true;
+      }
+
       function addGroup(name) {
         const trimmed = typeof name === 'string' ? name.trim() : '';
         if (trimmed === '' || [...trimmed].length > MAX_GROUP_NAME) return null;
@@ -919,6 +956,7 @@ window.__ModuleLoader__.load({
         deleteTask,
         clearCompleted,
         reorderTask,
+        moveTaskToGroup,
         addGroup,
         renameGroup,
         deleteGroup,
@@ -1199,7 +1237,7 @@ window.__ModuleLoader__.load({
     /* ------------------------------------------------------------------ */
 
     function TaskRow(props) {
-      const { task, t, locale, groupLabel: groupText, showGroup, canDrop } = props;
+      const { task, t, locale, groupLabel: groupText, canDrop } = props;
       const [editing, setEditing] = React.useState(false);
       const [draft, setDraft] = React.useState(task.title);
       const [confirming, setConfirming] = React.useState(false);
@@ -1299,7 +1337,21 @@ window.__ModuleLoader__.load({
       const meta = h(
         'span',
         { className: 'tdl-meta' },
-        showGroup && groupText ? h('span', { className: 'tdl-group-badge' }, groupText) : null,
+        groupText
+          ? h(
+              'button',
+              {
+                type: 'button',
+                className: 'tdl-group-badge',
+                onClick: (event) => props.onGroupMenu(task, event.currentTarget),
+                'aria-haspopup': 'menu',
+                'aria-expanded': props.groupMenuOpen === true,
+                'aria-label': t('task.groupValue', { name: groupText }),
+                title: t('task.groupValue', { name: groupText }),
+              },
+              groupText,
+            )
+          : null,
         h(
           'button',
           {
@@ -1521,6 +1573,144 @@ window.__ModuleLoader__.load({
             t('task.dueMenuClear'),
           ),
         ),
+      );
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Group menu                                                          */
+    /* ------------------------------------------------------------------ */
+
+    function GroupMenu(props) {
+      const { task, groups, t, rect, anchor, onPick, onClose } = props;
+      const panelRef = React.useRef(null);
+
+      function focusAnchor() {
+        if (anchor !== null && anchor !== undefined && typeof anchor.focus === 'function') {
+          anchor.focus();
+        }
+      }
+
+      React.useEffect(() => {
+        function onPointerDown(event) {
+          if (panelRef.current !== null && panelRef.current.contains(event.target)) return;
+          if (
+            anchor !== null &&
+            anchor !== undefined &&
+            typeof anchor.contains === 'function' &&
+            anchor.contains(event.target)
+          ) {
+            return;
+          }
+          onClose();
+        }
+        function onKeyDown(event) {
+          if (event.key === 'Escape') {
+            event.preventDefault();
+            focusAnchor();
+            onClose();
+          }
+        }
+        function onScroll(event) {
+          if (panelRef.current !== null && panelRef.current.contains(event.target)) return;
+          onClose();
+        }
+        document.addEventListener('mousedown', onPointerDown);
+        document.addEventListener('keydown', onKeyDown);
+        window.addEventListener('resize', onClose);
+        window.addEventListener('scroll', onScroll, true);
+        return () => {
+          document.removeEventListener('mousedown', onPointerDown);
+          document.removeEventListener('keydown', onKeyDown);
+          window.removeEventListener('resize', onClose);
+          window.removeEventListener('scroll', onScroll, true);
+        };
+      }, [onClose]);
+
+      React.useEffect(() => {
+        const panel = panelRef.current;
+        if (panel === null || typeof panel.querySelector !== 'function') return;
+        const current = panel.querySelector('[aria-checked="true"]');
+        const target = current !== null ? current : panel.querySelector('button');
+        if (target !== null && typeof target.focus === 'function') {
+          target.focus({ preventScroll: true });
+        }
+      }, []);
+
+      function onMenuKeyDown(event) {
+        if (event.key === 'Tab') {
+          onClose();
+          return;
+        }
+        if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+        const panel = panelRef.current;
+        if (panel === null || typeof panel.querySelectorAll !== 'function') return;
+        const items = Array.prototype.slice.call(
+          panel.querySelectorAll('button[role="menuitemradio"]'),
+        );
+        if (items.length === 0) return;
+        event.preventDefault();
+        const active = typeof document !== 'undefined' ? document.activeElement : null;
+        const index = items.indexOf(active);
+        const step = event.key === 'ArrowDown' ? 1 : -1;
+        const next = index < 0 ? 0 : (index + step + items.length) % items.length;
+        if (typeof items[next].focus === 'function') {
+          items[next].focus({ preventScroll: true });
+        }
+      }
+
+      const width = 190;
+      const estimatedHeight = Math.min(300, groups.length * 32 + 43);
+      const left = Math.min(
+        Math.max(8, rect.left),
+        Math.max(8, window.innerWidth - width - 8),
+      );
+      const below = rect.bottom + 6;
+      const above =
+        (typeof rect.top === 'number' ? rect.top : rect.bottom) - estimatedHeight - 6;
+      const top =
+        below + estimatedHeight <= window.innerHeight - 8 ? below : Math.max(8, above);
+
+      return h(
+        'div',
+        {
+          ref: panelRef,
+          className: 'tdl-pop tdl-groupmenu',
+          role: 'menu',
+          'aria-label': t('group.menuTitle'),
+          style: { position: 'fixed', left, top, width, maxHeight: estimatedHeight, zIndex: 9998 },
+          onKeyDown: onMenuKeyDown,
+        },
+        h(
+          'div',
+          { className: 'tdl-panel-section-title', 'aria-hidden': true },
+          t('group.menuTitle'),
+        ),
+        groups.map((group) => {
+          const current = group.id === task.groupId;
+          const label = groupLabel(group, t);
+          return h(
+            'button',
+            {
+              key: group.id,
+              type: 'button',
+              role: 'menuitemradio',
+              'aria-checked': current,
+              tabIndex: -1,
+              className: 'tdl-groupmenu-item',
+              title: label,
+              onClick: () => {
+                focusAnchor();
+                onPick(group.id);
+              },
+            },
+            h(
+              'span',
+              { className: 'tdl-groupmenu-check', 'aria-hidden': true },
+              current ? checkGlyph(12) : null,
+            ),
+            h('span', { className: 'tdl-groupmenu-label' }, label),
+          );
+        }),
       );
     }
 
@@ -1755,8 +1945,10 @@ window.__ModuleLoader__.load({
       const [helpOpen, setHelpOpen] = React.useState(false);
       const [groupDialog, setGroupDialog] = React.useState(null);
       const [dueMenu, setDueMenu] = React.useState(null);
+      const [groupMenu, setGroupMenu] = React.useState(null);
       const [clearConfirm, setClearConfirm] = React.useState(false);
       const [drag, setDrag] = React.useState(null);
+      const [groupDrop, setGroupDrop] = React.useState(null);
       const fileRef = React.useRef(null);
 
       React.useEffect(() => {
@@ -1769,8 +1961,17 @@ window.__ModuleLoader__.load({
       }, [state.tasks, dueMenu]);
 
       React.useEffect(() => {
+        if (groupMenu === null) return;
+        if (!state.tasks.some((task) => task.id === groupMenu.taskId)) setGroupMenu(null);
+      }, [state.tasks, groupMenu]);
+
+      React.useEffect(() => {
         if (state.ui.filter !== 'done') setClearConfirm(false);
       }, [state.ui.filter, state.ui.groupId]);
+
+      React.useEffect(() => {
+        setGroupMenu(null);
+      }, [state.ui.groupId, state.ui.filter]);
 
       const groups = allGroups(state.groups);
       const today = todayKey();
@@ -1897,6 +2098,8 @@ window.__ModuleLoader__.load({
 
       function beginDrag(id) {
         setDrag({ id, overId: null, after: false });
+        setGroupDrop(null);
+        setGroupMenu(null);
       }
 
       function hoverDrag(overId, after) {
@@ -1909,6 +2112,7 @@ window.__ModuleLoader__.load({
 
       function endDrag() {
         setDrag(null);
+        setGroupDrop(null);
       }
 
       function canDrop(targetTask) {
@@ -1923,6 +2127,57 @@ window.__ModuleLoader__.load({
         setDrag(null);
       }
 
+      function canDropOnGroup(groupId) {
+        if (drag === null) return false;
+        const dragged = state.tasks.find((task) => task.id === drag.id);
+        return dragged !== undefined && dragged.groupId !== groupId;
+      }
+
+      function hoverGroup(event, groupId) {
+        if (!canDropOnGroup(groupId)) {
+          if (groupDrop !== null) setGroupDrop(null);
+          return;
+        }
+        event.preventDefault();
+        if (event.dataTransfer !== null && event.dataTransfer !== undefined) {
+          event.dataTransfer.dropEffect = 'move';
+        }
+        if (drag !== null && drag.overId !== null) {
+          setDrag(Object.assign({}, drag, { overId: null, after: false }));
+        }
+        if (groupDrop !== groupId) setGroupDrop(groupId);
+      }
+
+      function dropOnGroup(event, groupId) {
+        event.preventDefault();
+        if (!canDropOnGroup(groupId)) {
+          setDrag(null);
+          setGroupDrop(null);
+          return;
+        }
+        const draggedId = drag.id;
+        setDrag(null);
+        setGroupDrop(null);
+        moveTaskToGroup(draggedId, groupId);
+      }
+
+      function moveTaskToGroup(taskId, groupId) {
+        const group = groups.find((item) => item.id === groupId);
+        if (group === undefined) return;
+        if (store.moveTaskToGroup(taskId, groupId)) {
+          showNotice(t('notice.moved', { name: groupLabel(group, t) }), 'ok');
+        }
+        setGroupMenu(null);
+      }
+
+      function onGroupMenu(task, element) {
+        setGroupMenu((current) =>
+          current !== null && current.taskId === task.id
+            ? null
+            : { taskId: task.id, rect: element.getBoundingClientRect(), anchor: element },
+        );
+      }
+
       function onDue(task, element) {
         setDueMenu({ taskId: task.id, rect: element.getBoundingClientRect() });
       }
@@ -1931,14 +2186,15 @@ window.__ModuleLoader__.load({
         setGroupDialog({ mode, groupId: groupId || null });
       }
 
-      function renderTask(task, sectionGroup) {
+      function renderTask(task) {
+        const group = groups.find((item) => item.id === task.groupId);
         return h(TaskRow, {
           key: task.id,
           task,
           t,
           locale,
-          showGroup: state.ui.groupId === 'all',
-          groupLabel: sectionGroup ? groupLabel(sectionGroup, t) : '',
+          groupLabel: group ? groupLabel(group, t) : '',
+          groupMenuOpen: groupMenu !== null && groupMenu.taskId === task.id,
           dragging: drag !== null && drag.id === task.id,
           drop:
             drag !== null && drag.overId === task.id
@@ -1947,6 +2203,7 @@ window.__ModuleLoader__.load({
                 : 'before'
               : null,
           canDrop,
+          onGroupMenu,
           onDragStart: beginDrag,
           onDragOver: hoverDrag,
           onDrop: dropOn,
@@ -1959,17 +2216,17 @@ window.__ModuleLoader__.load({
         });
       }
 
-      const sections =
+      const currentGroup =
         state.ui.groupId === 'all'
+          ? null
+          : groups.find((group) => group.id === state.ui.groupId) || null;
+      const sections =
+        currentGroup === null
           ? groups
               .map((group) => ({ group, tasks: tasksFor(group.id, state.ui.filter) }))
               .filter((section) => section.tasks.length > 0)
-          : [{ group: null, tasks: tasksFor(state.ui.groupId, state.ui.filter) }];
+          : [{ group: currentGroup, tasks: tasksFor(currentGroup.id, state.ui.filter) }];
 
-      const selectedCustom =
-        state.ui.groupId !== 'all'
-          ? state.groups.find((group) => group.id === state.ui.groupId)
-          : undefined;
       const dialogGroup =
         groupDialog !== null && groupDialog.mode === 'edit'
           ? state.groups.find((group) => group.id === groupDialog.groupId)
@@ -1992,6 +2249,10 @@ window.__ModuleLoader__.load({
 
       const dueTask =
         dueMenu === null ? null : state.tasks.find((task) => task.id === dueMenu.taskId);
+      const groupMenuTask =
+        groupMenu === null
+          ? null
+          : state.tasks.find((task) => task.id === groupMenu.taskId);
 
       const filters = h(
         'div',
@@ -2128,14 +2389,22 @@ window.__ModuleLoader__.load({
                   groups.map((group) =>
                     h(
                       'div',
-                      { key: group.id, className: 'tdl-rail-row' },
+                      {
+                        key: group.id,
+                        className: 'tdl-rail-row',
+                        onDragOver: (event) => hoverGroup(event, group.id),
+                        onDragLeave: () => {
+                          if (groupDrop === group.id) setGroupDrop(null);
+                        },
+                        onDrop: (event) => dropOnGroup(event, group.id),
+                      },
                       h(
                         'button',
                         {
                           type: 'button',
                           className: `tdl-rail-item${
                             state.ui.groupId === group.id ? ' tdl-rail-item-active' : ''
-                          }`,
+                          }${groupDrop === group.id ? ' tdl-rail-item-drop' : ''}`,
                           onClick: () => store.setSelectedGroup(group.id),
                         },
                         h('span', { className: 'tdl-rail-label' }, groupLabel(group, t)),
@@ -2284,7 +2553,7 @@ window.__ModuleLoader__.load({
                                   ),
                                 )
                               : null,
-                            section.tasks.map((task) => renderTask(task, section.group)),
+                            section.tasks.map((task) => renderTask(task)),
                           ),
                         ),
                       ),
@@ -2311,6 +2580,18 @@ window.__ModuleLoader__.load({
                 rect: dueMenu.rect,
                 onSet: store.setDue,
                 onClose: () => setDueMenu(null),
+              })
+            : null,
+          groupMenu !== null && groupMenuTask !== undefined && groupMenuTask !== null
+            ? h(GroupMenu, {
+                key: 'group',
+                task: groupMenuTask,
+                groups,
+                t,
+                rect: groupMenu.rect,
+                anchor: groupMenu.anchor,
+                onPick: (groupId) => moveTaskToGroup(groupMenuTask.id, groupId),
+                onClose: () => setGroupMenu(null),
               })
             : null,
           groupDialog !== null
