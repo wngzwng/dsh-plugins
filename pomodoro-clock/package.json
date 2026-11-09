@@ -1,6 +1,6 @@
 {
   "name": "@local/pomodoro-clock",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "description": "Pomodoro timer for the DeepSeek Harness Web UI: a compact focus/break timer under the composer with progress ring, chime, cycle dots and settings.",
   "type": "module",

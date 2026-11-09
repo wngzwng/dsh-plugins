@@ -41,4 +41,6 @@ DeepSeek Harness Web UI 的番茄时钟插件。它作为一条环境控件渲�
 
 - 计时状态保存在插件模块内，切换会话/滚动不会中断；页面刷新会重置进行中的计时
   （设置与今日统计保留）。
-- 不依赖任何 Harness 客户端内部包，只从共享模块表取 `react`。
+- 不依赖任何 Harness 客户端内部包，只从共享模块表取 `react` / `react-dom`。设置对话框
+  通过 `createPortal` 挂到 `document.body`：输入框 dock 设置了 `will-change: transform`，
+  会改变 `position: fixed` 的包含块，内联渲染时遮罩只能盖住输入框条、弹窗会被挤到屏幕外。

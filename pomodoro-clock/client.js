@@ -12,6 +12,12 @@ window.__ModuleLoader__.load({
   factory(require) {
     const React = require('react');
     const h = React.createElement;
+    let ReactDOM = null;
+    try {
+      ReactDOM = require('react-dom');
+    } catch {
+      ReactDOM = null;
+    }
 
     const NS = 'pomodoro-clock';
     const SETTINGS_KEY = 'dsh-pomodoro-clock:settings:v1';
@@ -60,6 +66,7 @@ window.__ModuleLoader__.load({
         'settings.decrease': 'Decrease',
         'settings.increase': 'Increase',
         'unit.min': 'min',
+        'unit.times': 'times',
       },
       zh: {
         'phase.focus': '专注',
@@ -86,6 +93,7 @@ window.__ModuleLoader__.load({
         'settings.decrease': '减少',
         'settings.increase': '增加',
         'unit.min': '分钟',
+        'unit.times': '次',
       },
     };
 
@@ -102,7 +110,7 @@ window.__ModuleLoader__.load({
       '.pomo-dot-on{background:var(--dsw-alias-brand-primary)}',
       '.pomo-icon-btn{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;padding:0;border:0;border-radius:999px;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;transition:color .15s,background .15s}',
       '.pomo-icon-btn:hover{color:var(--dsw-alias-label-primary);background:color-mix(in srgb,var(--dsw-alias-label-secondary) 12%,transparent)}',
-      '.pomo-backdrop{position:fixed;inset:0;z-index:9999;display:grid;place-items:center;padding:24px;background:color-mix(in srgb,#000 28%,transparent)}',
+      '.pomo-backdrop{position:fixed;inset:0;z-index:10000;display:grid;place-items:center;padding:24px;background:color-mix(in srgb,#000 28%,transparent)}',
       '.pomo-dialog{box-sizing:border-box;width:min(340px,100%);max-height:calc(100dvh - 48px);display:flex;flex-direction:column;padding:18px 20px 16px;border:1px solid var(--dsw-alias-border-l1);border-radius:14px;background:var(--dsw-alias-bg-overlay,var(--dsw-alias-bg-layer-1));color:var(--dsw-alias-label-primary);box-shadow:0 18px 48px color-mix(in srgb,#000 30%,transparent);font-family:inherit;outline:none}',
       '.pomo-dialog-head{display:flex;align-items:center;justify-content:space-between;gap:12px}',
       '.pomo-dialog-title{margin:0;font-size:15px;font-weight:600;line-height:22px}',
@@ -551,6 +559,30 @@ window.__ModuleLoader__.load({
     }
 
     /* ------------------------------------------------------------------ */
+    /* Portal                                                              */
+    /* ------------------------------------------------------------------ */
+
+    /*
+     * The docked composer sets `will-change: transform`, so it becomes the
+     * containing block for `position: fixed` descendants. A fixed scrim rendered
+     * inline in the dock would therefore cover only the composer strip and the
+     * dialog would be laid out inside that strip. Portalling the dialog to
+     * `document.body` restores viewport-relative positioning (the same hazard the
+     * to-do dock popover hit; the prompt library uses the same body portal).
+     */
+    function Portal(props) {
+      const doc = typeof document !== 'undefined' ? document : null;
+      if (doc && doc.body && ReactDOM && typeof ReactDOM.createPortal === 'function') {
+        try {
+          return ReactDOM.createPortal(props.children, doc.body);
+        } catch {
+          /* fall through to inline rendering */
+        }
+      }
+      return h(React.Fragment, null, props.children);
+    }
+
+    /* ------------------------------------------------------------------ */
     /* Settings dialog                                                     */
     /* ------------------------------------------------------------------ */
 
@@ -586,8 +618,9 @@ window.__ModuleLoader__.load({
         });
       };
 
-      const numberRow = (key, label) => {
+      const numberRow = (key, label, unitText) => {
         const limits = LIMITS[key];
+        const unit = unitText || t('unit.min');
         return h(
           'div',
           { className: 'pomo-field', key },
@@ -613,7 +646,7 @@ window.__ModuleLoader__.load({
               min: limits[0],
               max: limits[1],
               value: draft[key],
-              'aria-label': `${label} (${t('unit.min')})`,
+              'aria-label': `${label} (${unit})`,
               onChange: (event) => {
                 const parsed = Number(event.target.value);
                 if (!Number.isFinite(parsed)) return;
@@ -621,7 +654,7 @@ window.__ModuleLoader__.load({
                 update({ [key]: next });
               },
             }),
-            h('span', { className: 'pomo-unit', 'aria-hidden': true }, t('unit.min')),
+            h('span', { className: 'pomo-unit', 'aria-hidden': true }, unit),
             h(
               'button',
               {
@@ -685,7 +718,7 @@ window.__ModuleLoader__.load({
           numberRow('focus', t('settings.focus')),
           numberRow('short', t('settings.short')),
           numberRow('long', t('settings.long')),
-          numberRow('rounds', t('settings.rounds')),
+          numberRow('rounds', t('settings.rounds'), t('unit.times')),
           toggleRow('autoStart', t('settings.autoStart')),
           toggleRow('sound', t('settings.sound')),
         ),
@@ -809,20 +842,24 @@ window.__ModuleLoader__.load({
         ),
         settingsOpen
           ? h(
-              'div',
-              {
-                key: 'backdrop',
-                className: 'pomo-backdrop',
-                onMouseDown: (event) => {
-                  if (event.target === event.currentTarget) setSettingsOpen(false);
+              Portal,
+              { key: 'portal' },
+              h(
+                'div',
+                {
+                  key: 'backdrop',
+                  className: 'pomo-backdrop',
+                  onMouseDown: (event) => {
+                    if (event.target === event.currentTarget) setSettingsOpen(false);
+                  },
                 },
-              },
-              h(SettingsDialog, {
-                store,
-                t,
-                state,
-                onClose: closeSettings,
-              }),
+                h(SettingsDialog, {
+                  store,
+                  t,
+                  state,
+                  onClose: closeSettings,
+                }),
+              ),
             )
           : null,
       );
