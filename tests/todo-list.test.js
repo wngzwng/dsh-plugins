@@ -969,3 +969,13 @@ test('keyboard Enter on the focused title still starts editing', () => {
   assert.ok(input, 'Enter opens the inline editor');
   assert.equal(input.props.value, '写周报');
 });
+
+test('row focus no longer keeps the delete and empty-date controls visible', () => {
+  const h = harness();
+  h.render();
+  const css = h.all('style').map((node) => h.text(node)).join('');
+  assert.doesNotMatch(css, /\.tdl-task:focus-within \.tdl-del/);
+  assert.match(css, /\.tdl-del:focus-visible,\.tdl-task-confirming \.tdl-del\{opacity:1\}/);
+  assert.doesNotMatch(css, /\.tdl-task:focus-within \.tdl-due-empty/);
+  assert.match(css, /\.tdl-due-empty:focus-visible\{opacity:\.7\}/);
+});

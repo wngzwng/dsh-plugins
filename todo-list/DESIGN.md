@@ -165,7 +165,7 @@ todo-list/
 
 - `node --check client.js` / `node --check index.js` 通过；`package.json` 与两个 locale JSON 可解析。
 - 用 jsdom + React 19 写了 44 项集成检查（脚本不随 bundle 发布），覆盖：dock 快速添加与今日计数、勾选完成、整页增删改、就地改名、优先级循环、日期菜单、四个筛选、分组新建 / 删除与任务迁移、已完成清空、JSON 导入合并、重载恢复、损坏 localStorage 降级、中英文切换。全部通过，且无 React key 警告。
-- 随仓库提交 `tests/todo-list.test.js`（无 npm 依赖，fake window/React 渲染真实组件树）：26 项检查覆盖分组菜单、点选换组、拖到左栏换组、同组 no-op、任意视图换组、Escape / 外部点击 / Tab 关闭、菜单与视图切换联动、`aria-expanded`、空白分组 order 0、已完成任务换组、侧栏计数、刷新恢复、未知分组与保留 id `all` 回退、中英双语、标题单击不重命名 / 双击与键盘编辑、Markdown 导出与新增任务回归；`node --test tests/*.test.js` 全部通过。
+- 随仓库提交 `tests/todo-list.test.js`（无 npm 依赖，fake window/React 渲染真实组件树）：27 项检查覆盖分组菜单、点选换组、拖到左栏换组、同组 no-op、任意视图换组、Escape / 外部点击 / Tab 关闭、菜单与视图切换联动、`aria-expanded`、空白分组 order 0、已完成任务换组、侧栏计数、刷新恢复、未知分组与保留 id `all` 回退、中英双语、标题单击不重命名 / 双击与键盘编辑、Markdown 导出与新增任务回归；`node --test tests/*.test.js` 全部通过。
 - 仍需你安装后人工确认：真实主题下的视觉对比度、拖拽手感、弹层在输入框上方的定位。
 
 > 说明：我这边没有 `plugin_manager` 工具，最后一步「安装 + 浏览器里看效果」需要你在 Plugin Manager 里装 `todo-list/` 目录。
@@ -198,7 +198,7 @@ todo-list/
 
 ### 10.3 自动验证
 
-`tests/todo-list.test.js`（随仓库提交，无 npm 依赖）用 fake `window` + 最小递归 React 渲染真实组件树，26 项检查覆盖：分组菜单内容与当前项、点选换组与目标组末尾排序、同组 no-op、自定义 / 空白分组、拖放换组与高亮、同组拖放、单分组视图内换组、Esc / 外部点击 / Tab 关闭、视图切换自动关闭、`aria-expanded`、已完成任务换组、侧栏计数、刷新恢复、未知分组与保留 id `all` 回退、英文界面、标题单击 / 双击行为、Markdown 导出与新增任务回归。
+`tests/todo-list.test.js`（随仓库提交，无 npm 依赖）用 fake `window` + 最小递归 React 渲染真实组件树，27 项检查覆盖：分组菜单内容与当前项、点选换组与目标组末尾排序、同组 no-op、自定义 / 空白分组、拖放换组与高亮、同组拖放、单分组视图内换组、Esc / 外部点击 / Tab 关闭、视图切换自动关闭、`aria-expanded`、已完成任务换组、侧栏计数、刷新恢复、未知分组与保留 id `all` 回退、英文界面、标题单击 / 双击行为、Markdown 导出与新增任务回归。
 
 ### 10.4 仍未做
 
@@ -207,3 +207,7 @@ todo-list/
 ### 10.5 v1.1.1 调整（2026-11-09）
 
 - 任务标题从「单击就地编辑」改为「双击就地编辑」，避免单击查看/选中时误进重命名；键盘聚焦标题后 Enter / 空格仍可编辑，工具提示改为「双击编辑」。
+
+### 10.6 v1.1.2 调整（2026-11-09）
+
+- 删除 `×` 与空日期徽标不再因行内任意元素获得焦点而常显：原 `:focus-within` 规则会导致单击标题 / 勾选框后，鼠标移开仍显示 `×`。现在只在行悬停、控件自身键盘 `:focus-visible` 或删除确认态显示；键盘用户 Tab 到 `×` 时仍可见。
