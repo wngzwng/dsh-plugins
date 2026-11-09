@@ -285,3 +285,166 @@ test('panel and composer entry can be unmounted independently', () => {
   assert.match(h.text(), /代码审查助手/);
   h.dispose();
 });
+
+/* ------------------------------------------------------------------------- */
+/* Markdown preview (opt-in; raw text stays the source)                      */
+/* ------------------------------------------------------------------------- */
+
+const MARKDOWN_BODY = [
+  '# 审查清单',
+  '',
+  '请按 **边界条件** 与 *错误处理* 审查，保留 `inline code`。',
+  '同一段落第二行。',
+  '',
+  '- 检查空值',
+  '- 检查并发',
+  '',
+  '1. 先读代码',
+  '2. 再给建议',
+  '',
+  '> 引用：不要臆测需求。',
+  '',
+  '```js',
+  'const value = "<b>literal</b>";',
+  '```',
+  '',
+  '| 维度 | 要求 |',
+  '| --- | --- |',
+  '| 目标 | 明确 |',
+  '',
+  '[安全链接](https://example.com/a) 与 [危险链接](javascript:alert(1))',
+  '![远程图片](https://example.com/a.png)',
+  '<script>alert(1)</script>',
+].join('\n');
+
+function markdownHarness(extraStorage = {}) {
+  return harness({
+    storage: {
+      [DATA_KEY]: JSON.stringify({
+        version: 1,
+        tags: [],
+        prompts: [seedPrompt({ id: 'p-md', title: 'Markdown 提示词', body: MARKDOWN_BODY })],
+      }),
+      ...extraStorage,
+    },
+  });
+}
+
+function openMarkdownDetail(h) {
+  h.renderPage();
+  const row = h.all('button').find((node) => h.text(node).includes('Markdown 提示词'));
+  assert.ok(row, 'seeded Markdown prompt row exists');
+  row.props.onClick({ preventDefault() {}, stopPropagation() {} });
+  h.render();
+}
+
+function markdownViewNode(h) {
+  return h
+    .all('div')
+    .find((node) => typeof node.props.className === 'string' && node.props.className.split(' ').includes('pl-markdown'));
+}
+
+test('the detail body is plain text by default and opts into rendered Markdown', () => {
+  const h = markdownHarness();
+  openMarkdownDetail(h);
+  const rawBody = h.all('pre').find((node) => node.props.className === 'pl-detail-body');
+  assert.ok(rawBody, 'default plain body exists');
+  assert.equal(h.text(rawBody).includes('**边界条件**'), true, 'raw Markdown is shown literally');
+  assert.equal(markdownViewNode(h), undefined, 'nothing is rendered before opt-in');
+
+  const toggle = h
+    .all('button')
+    .find((node) => h.text(node).trim() === 'Markdown 渲染');
+  assert.ok(toggle, 'Markdown toggle exists');
+  assert.equal(toggle.props['aria-pressed'], false);
+  toggle.props.onClick({});
+  h.render();
+
+  const view = markdownViewNode(h);
+  assert.ok(view, 'rendered Markdown view exists');
+  assert.equal(h.text(view).includes('**边界条件**'), false, 'rendered mode hides literal markers');
+  const strong = h.descendants(view, (node) => node.type === 'strong');
+  assert.deepEqual(strong.map((node) => h.text(node)), ['边界条件']);
+  assert.deepEqual(h.descendants(view, (node) => node.type === 'em').map((node) => h.text(node)), ['错误处理']);
+  assert.deepEqual(h.descendants(view, (node) => node.type === 'code').map((node) => h.text(node)).slice(0, 1), ['inline code']);
+  assert.equal(h.descendants(view, (node) => node.type === 'h1').length, 1);
+  assert.equal(h.descendants(view, (node) => node.type === 'ul').length, 1);
+  assert.equal(h.descendants(view, (node) => node.type === 'ol').length, 1);
+  assert.equal(h.descendants(view, (node) => node.type === 'blockquote').length, 1);
+  assert.equal(h.descendants(view, (node) => node.type === 'table').length, 1);
+  assert.equal(h.descendants(view, (node) => node.type === 'pre').length, 1, 'fenced code block');
+  assert.equal(h.text(view).includes('<b>literal</b>'), true, 'code fence content is literal text');
+
+  const links = h.descendants(view, (node) => node.type === 'a');
+  assert.deepEqual(links.map((node) => node.props.href), ['https://example.com/a']);
+  assert.equal(h.descendants(view, (node) => node.type === 'script').length, 0, 'no script element');
+  assert.equal(h.descendants(view, (node) => node.type === 'img').length, 0, 'images are not loaded');
+  assert.equal(h.text(view).includes('<script>alert(1)</script>'), true, 'raw HTML stays literal text');
+  assert.equal(
+    h.text(view).includes('![远程图片](https://example.com/a.png)'),
+    true,
+    'image Markdown stays literal',
+  );
+
+  const pressed = h
+    .all('button')
+    .find((node) => h.text(node).trim() === 'Markdown 渲染');
+  assert.equal(pressed.props['aria-pressed'], true);
+  const prefs = JSON.parse(h.storage.map.get('dsh-prompt-library:ui/v1'));
+  assert.equal(prefs.bodyRender, 'markdown');
+  h.dispose();
+});
+
+test('copying keeps the raw Markdown while the detail view is rendered', async () => {
+  const h = markdownHarness();
+  openMarkdownDetail(h);
+  h.clickButton('Markdown 渲染');
+  assert.ok(markdownViewNode(h));
+  h.clickButton('复制正文');
+  await h.flush();
+  assert.equal(h.calls.copies.at(-1), MARKDOWN_BODY);
+  assert.equal(h.promptById('p-md').useCount, 1, 'copy success still records usage');
+  h.dispose();
+});
+
+test('the Markdown preference persists and applies to the quick picker', async () => {
+  const h = markdownHarness({
+    'dsh-prompt-library:ui/v1': JSON.stringify({ bodyRender: 'markdown' }),
+  });
+  openMarkdownDetail(h);
+  assert.ok(markdownViewNode(h), 'saved preference opens in rendered mode');
+
+  h.renderQuick();
+  h.clickButton('提示库');
+  const row = h.all('button').find((node) => h.text(node).includes('Markdown 提示词'));
+  row.props.onClick({ preventDefault() {}, stopPropagation() {} });
+  h.render();
+  const preview = markdownViewNode(h);
+  assert.ok(preview, 'quick picker preview renders Markdown too');
+  assert.equal(h.descendants(preview, (node) => node.type === 'table').length, 1);
+
+  h.clickButton('复制正文');
+  await h.flush();
+  assert.equal(h.calls.copies.at(-1), MARKDOWN_BODY, 'quick copy keeps raw Markdown');
+
+  h.clickButton('插入输入框');
+  await h.flush();
+  assert.equal(h.calls.inserts.at(-1).text, MARKDOWN_BODY, 'quick insert keeps raw Markdown');
+  assert.equal(h.calls.drafts.length, 0, 'insert never replaces the whole draft');
+  h.dispose();
+});
+
+test('switching back to source text restores the exact raw view', () => {
+  const h = markdownHarness({
+    'dsh-prompt-library:ui/v1': JSON.stringify({ bodyRender: 'markdown' }),
+  });
+  openMarkdownDetail(h);
+  assert.ok(markdownViewNode(h));
+  h.clickButton('原文');
+  const rawBody = h.all('pre').find((node) => node.props.className === 'pl-detail-body');
+  assert.ok(rawBody);
+  assert.equal(h.text(rawBody), MARKDOWN_BODY);
+  const prefs = JSON.parse(h.storage.map.get('dsh-prompt-library:ui/v1'));
+  assert.equal(prefs.bodyRender, 'plain');
+  h.dispose();
+});

@@ -537,7 +537,13 @@ function createStore({ storage, uuid, now })
    （off/none → minimal/low → …），按 `provider/model` 缓存 10 分钟；再以独立输出预算
    `REVIEW_MAX_TOKENS = 2048` 发起调用。无推理元数据或读取失败时省略 `reasoningEffort`，
    保持默认行为。已在安装后的真实 DSH 环境验证成功（deepseek-flash，96 字评价，约 1.3s）。
-9. **样式与测试**：UI 片段各自持有 `FULL_PANEL_CSS`/`QUICK_PICKER_CSS`，骨架注入一个
+9. **正文 Markdown 预览（只读、可选）**：默认仍按纯文本 `<pre>` 渲染，保留原始格式；详情页与
+   快捷面板提供「原文 / Markdown 渲染」切换，偏好写入 `ui` 存储的 `bodyRender`（默认 plain）。
+   渲染器位于 `client.js` 骨架：只生成 React 文本/元素节点，不使用 HTML 解析或
+   `dangerouslySetInnerHTML`；支持标题、段落（保留软换行）、粗/斜/删除线、行内代码、围栏代码块、
+   列表、引用、表格、水平线与安全链接（仅绝对 http(s)/mailto，`noreferrer noopener`）；
+   HTML/脚本按字面文本显示，图片 Markdown 不加载；复制/插入/搜索/导出/AI 始终用原文。
+10. **样式与测试**：UI 片段各自持有 `FULL_PANEL_CSS`/`QUICK_PICKER_CSS`，骨架注入一个
    `data-dsh-plugin="prompt-library"` 的 `<style>` 并随卸载移除；测试用
    `tests/helpers/prompt-library-harness.js` 的假 React/portal/document/locale/fetch 渲染真实
-   组件树。当前测试：提示库 139 项（core 47、host 28、panel 28、quick 20、integration 16），全量 210/210。
+   组件树。当前测试：提示库 143 项（core 47、host 28、panel 28、quick 20、integration 20），全量 218/218（含既有插件，其中有并发新增的番茄时钟测试，未受影响）。

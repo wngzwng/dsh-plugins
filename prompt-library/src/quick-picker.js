@@ -50,6 +50,8 @@ const QUICK_PICKER_CSS = [
   '.plq-preview-col{display:flex;flex-direction:column;min-width:0;min-height:0;border-left:.5px solid var(--dsw-alias-border-l1);padding-left:12px}',
   '.plq-preview{display:flex;flex-direction:column;gap:8px;min-height:0;flex:1}',
   '.plq-preview-head{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:4px 10px}',
+  '.plq-preview-viewrow{display:flex;flex-wrap:wrap;align-items:center;gap:8px}',
+  '.plq-preview-body-md{white-space:normal;font-family:inherit}',
   '.plq-preview-title{margin:0;font-size:14px;font-weight:600;overflow-wrap:anywhere}',
   '.plq-preview-usage{margin:0;font-size:12.5px;line-height:1.6;color:var(--dsw-alias-label-secondary);overflow-wrap:anywhere;white-space:pre-wrap}',
   '.plq-preview-body{margin:0;padding:10px 12px;max-height:40vh;overflow:auto;overscroll-behavior:contain;border:.5px solid var(--dsw-alias-border-l1);border-radius:9px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font-family:inherit;font-size:12.8px;line-height:1.65;white-space:pre-wrap;overflow-wrap:anywhere}',
@@ -299,7 +301,7 @@ function QPRatingStrip(props) {
 }
 
 function QPPreview(props) {
-  const { prompt, t, insertAvailable } = props;
+  const { prompt, t, insertAvailable, bodyMode, onBodyMode } = props;
   if (!prompt) {
     return h(QPEmptyState, {
       title: t('quick.noSelection'),
@@ -319,14 +321,31 @@ function QPPreview(props) {
     ),
     prompt.usage ? h('p', { className: 'plq-preview-usage' }, t('quick.usageLine', { usage: prompt.usage })) : null,
     h(
-      'pre',
-      {
-        className: 'plq-preview-body',
-        tabIndex: 0,
-        'aria-label': t('quick.previewLabel'),
-      },
-      prompt.body,
+      'div',
+      { className: 'plq-preview-viewrow' },
+      h(BodyViewToggle, {
+        mode: bodyMode === 'markdown' ? 'markdown' : 'plain',
+        onChange: onBodyMode,
+        t,
+      }),
+      bodyMode === 'markdown'
+        ? h('span', { className: 'plq-hint' }, t('common.markdownHint'))
+        : null,
     ),
+    bodyMode === 'markdown'
+      ? h(MarkdownView, {
+          text: prompt.body,
+          className: 'plq-preview-body plq-preview-body-md',
+        })
+      : h(
+          'pre',
+          {
+            className: 'plq-preview-body',
+            tabIndex: 0,
+            'aria-label': t('quick.previewLabel'),
+          },
+          prompt.body,
+        ),
     h(TagChips, { tags: props.tags, limit: 6 }),
     h(
       'div',
@@ -377,6 +396,7 @@ function PromptLibraryQuickEntry(props) {
   const [selectedId, setSelectedId] = React.useState(null);
   const [notice, setNotice] = React.useState(null);
   const [ratedId, setRatedId] = React.useState(null);
+  const [bodyMode, setBodyMode] = useBodyRenderMode(store);
 
   const entryRef = React.useRef(null);
   const searchRef = React.useRef(null);
@@ -624,6 +644,8 @@ function PromptLibraryQuickEntry(props) {
           t,
           tags: selected ? tagsForPrompt(data, selected) : [],
           insertAvailable,
+          bodyMode,
+          onBodyMode: setBodyMode,
           onCopy: () => handleCopy(selected),
           onInsert: () => handleInsert(selected),
           onOpenLibrary: handleOpenLibrary,

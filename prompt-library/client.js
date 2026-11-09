@@ -2191,6 +2191,9 @@ const FULL_PANEL_CSS = [
   '.pl-detail-tags{display:flex;flex-wrap:wrap;align-items:center;gap:5px;margin:8px 0 0}',
   '.pl-detail-section{margin:18px 0 0;padding:14px;border:.5px solid var(--dsw-alias-border-l1);border-radius:11px;background:var(--dsw-alias-bg-layer-1)}',
   '.pl-section-title{margin:0 0 10px;font-size:12.5px;font-weight:600;letter-spacing:.02em;color:var(--dsw-alias-label-secondary)}',
+  '.pl-section-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 0 10px}',
+  '.pl-section-title-inline{margin:0}',
+  '.pl-detail-body-md{font-family:inherit;white-space:normal;font-size:13px;line-height:1.7}',
   '.pl-detail-body{margin:0;max-height:46vh;overflow:auto;padding:10px;border-radius:8px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font:12.8px/1.65 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere}',
   '.pl-detail-usage{margin:0;color:var(--dsw-alias-label-primary);font-size:12.8px;line-height:1.65;white-space:pre-wrap;overflow-wrap:anywhere}',
   '.pl-field{margin:0 0 14px}',
@@ -2931,6 +2934,7 @@ function FPDetail(props) {
   const [rateAfterUse, setRateAfterUse] = React.useState(false);
   const [copyNotice, setCopyNotice] = React.useState(null);
   const [aiDeleteOpen, setAiDeleteOpen] = React.useState(false);
+  const [bodyMode, setBodyMode] = useBodyRenderMode(store);
   const tags = tagsForPrompt(data, prompt);
   const localeId = fpActiveLocale(locale);
   const created = formatDateTime(prompt.createdAt, localeId);
@@ -3066,8 +3070,18 @@ function FPDetail(props) {
     h(
       'div',
       { className: 'pl-detail-section' },
-      h('h3', { className: 'pl-section-title' }, t('full.detail.bodyTitle')),
-      h('pre', { className: 'pl-detail-body' }, prompt.body),
+      h(
+        'div',
+        { className: 'pl-section-head' },
+        h('h3', { className: 'pl-section-title pl-section-title-inline' }, t('full.detail.bodyTitle')),
+        h(BodyViewToggle, { mode: bodyMode, onChange: setBodyMode, t }),
+      ),
+      bodyMode === 'markdown'
+        ? h(MarkdownView, { text: prompt.body, className: 'pl-detail-body pl-detail-body-md' })
+        : h('pre', { className: 'pl-detail-body' }, prompt.body),
+      bodyMode === 'markdown'
+        ? h('p', { className: 'pl-field-hint' }, t('common.markdownHint'))
+        : null,
     ),
     prompt.usage
       ? h(
@@ -4380,6 +4394,8 @@ const QUICK_PICKER_CSS = [
   '.plq-preview-col{display:flex;flex-direction:column;min-width:0;min-height:0;border-left:.5px solid var(--dsw-alias-border-l1);padding-left:12px}',
   '.plq-preview{display:flex;flex-direction:column;gap:8px;min-height:0;flex:1}',
   '.plq-preview-head{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:4px 10px}',
+  '.plq-preview-viewrow{display:flex;flex-wrap:wrap;align-items:center;gap:8px}',
+  '.plq-preview-body-md{white-space:normal;font-family:inherit}',
   '.plq-preview-title{margin:0;font-size:14px;font-weight:600;overflow-wrap:anywhere}',
   '.plq-preview-usage{margin:0;font-size:12.5px;line-height:1.6;color:var(--dsw-alias-label-secondary);overflow-wrap:anywhere;white-space:pre-wrap}',
   '.plq-preview-body{margin:0;padding:10px 12px;max-height:40vh;overflow:auto;overscroll-behavior:contain;border:.5px solid var(--dsw-alias-border-l1);border-radius:9px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font-family:inherit;font-size:12.8px;line-height:1.65;white-space:pre-wrap;overflow-wrap:anywhere}',
@@ -4629,7 +4645,7 @@ function QPRatingStrip(props) {
 }
 
 function QPPreview(props) {
-  const { prompt, t, insertAvailable } = props;
+  const { prompt, t, insertAvailable, bodyMode, onBodyMode } = props;
   if (!prompt) {
     return h(QPEmptyState, {
       title: t('quick.noSelection'),
@@ -4649,14 +4665,31 @@ function QPPreview(props) {
     ),
     prompt.usage ? h('p', { className: 'plq-preview-usage' }, t('quick.usageLine', { usage: prompt.usage })) : null,
     h(
-      'pre',
-      {
-        className: 'plq-preview-body',
-        tabIndex: 0,
-        'aria-label': t('quick.previewLabel'),
-      },
-      prompt.body,
+      'div',
+      { className: 'plq-preview-viewrow' },
+      h(BodyViewToggle, {
+        mode: bodyMode === 'markdown' ? 'markdown' : 'plain',
+        onChange: onBodyMode,
+        t,
+      }),
+      bodyMode === 'markdown'
+        ? h('span', { className: 'plq-hint' }, t('common.markdownHint'))
+        : null,
     ),
+    bodyMode === 'markdown'
+      ? h(MarkdownView, {
+          text: prompt.body,
+          className: 'plq-preview-body plq-preview-body-md',
+        })
+      : h(
+          'pre',
+          {
+            className: 'plq-preview-body',
+            tabIndex: 0,
+            'aria-label': t('quick.previewLabel'),
+          },
+          prompt.body,
+        ),
     h(TagChips, { tags: props.tags, limit: 6 }),
     h(
       'div',
@@ -4707,6 +4740,7 @@ function PromptLibraryQuickEntry(props) {
   const [selectedId, setSelectedId] = React.useState(null);
   const [notice, setNotice] = React.useState(null);
   const [ratedId, setRatedId] = React.useState(null);
+  const [bodyMode, setBodyMode] = useBodyRenderMode(store);
 
   const entryRef = React.useRef(null);
   const searchRef = React.useRef(null);
@@ -4954,6 +4988,8 @@ function PromptLibraryQuickEntry(props) {
           t,
           tags: selected ? tagsForPrompt(data, selected) : [],
           insertAvailable,
+          bodyMode,
+          onBodyMode: setBodyMode,
           onCopy: () => handleCopy(selected),
           onInsert: () => handleInsert(selected),
           onOpenLibrary: handleOpenLibrary,
@@ -5060,6 +5096,10 @@ function PromptLibraryQuickEntry(props) {
         'common.insertNoApi': '当前 DSH 版本未提供安全插入接口，请使用复制。',
         'common.usedCount': '已使用 {n} 次',
         'common.notAvailable': '不可用',
+        'common.bodyView': '正文显示方式',
+        'common.bodyRaw': '原文',
+        'common.bodyRendered': 'Markdown 渲染',
+        'common.markdownHint': '渲染只用于阅读；复制与插入始终使用原始 Markdown 文本。',
         'notice.import.csvApplied': '已导入 {added} 条提示词，新建 {tags} 个标签',
         'notice.import.jsonMerged': '已合并导入：新增 {added} 条，跳过重复 {duplicates} 条',
         'notice.import.jsonReplaced': '已替换导入：新增 {added} 条，跳过重复 {duplicates} 条',
@@ -5115,6 +5155,10 @@ function PromptLibraryQuickEntry(props) {
         'common.insertNoApi': 'This DSH version exposes no safe insertion API — use Copy instead.',
         'common.usedCount': 'Used {n} times',
         'common.notAvailable': 'Unavailable',
+        'common.bodyView': 'Body display',
+        'common.bodyRaw': 'Source',
+        'common.bodyRendered': 'Markdown',
+        'common.markdownHint': 'Rendering is for reading only; copy and insert always use the raw Markdown text.',
         'notice.import.csvApplied': 'Imported {added} prompts and created {tags} tags',
         'notice.import.jsonMerged': 'Merged: {added} added, {duplicates} duplicates skipped',
         'notice.import.jsonReplaced': 'Replaced: {added} added, {duplicates} duplicates skipped',
@@ -6241,6 +6285,342 @@ function PromptLibraryQuickEntry(props) {
     }
 
     /* ------------------------------------------------------------------ */
+    /* Safe Markdown preview (opt-in; the raw text stays the source)       */
+    /* ------------------------------------------------------------------ */
+    /* React elements only: every piece of prompt text becomes a text node or
+     * a bounded element. There is no HTML parsing and no
+     * dangerouslySetInnerHTML, so raw HTML/scripts in a prompt are displayed
+     * literally and can never execute. Images are intentionally not rendered
+     * (no remote loads, no tracking); only http(s)/mailto links become anchors. */
+
+    const MARKDOWN_SAFE_SCHEMES = { 'http:': true, 'https:': true, 'mailto:': true };
+
+    function safeMarkdownHref(raw) {
+      const value = String(raw === null || raw === undefined ? '' : raw).trim();
+      // Only absolute, explicitly safe schemes: relative or protocol-relative
+      // targets would navigate the DSH shell itself.
+      if (!value || !/^(https?:\/\/|mailto:)/i.test(value)) return null;
+      if (/[\u0000-\u001f\s]/.test(value)) return null;
+      try {
+        const parsed = new URL(value);
+        if (!MARKDOWN_SAFE_SCHEMES[parsed.protocol]) return null;
+        return value;
+      } catch {
+        return null;
+      }
+    }
+
+    function markdownInlineNodes(text, depth) {
+      const source = String(text === null || text === undefined ? '' : text);
+      const level = typeof depth === 'number' ? depth : 0;
+      if (!source) return [];
+      const nodes = [];
+      let buffer = '';
+      let index = 0;
+      const flush = () => {
+        if (buffer) {
+          nodes.push(buffer);
+          buffer = '';
+        }
+      };
+      while (index < source.length) {
+        const rest = source.slice(index);
+        const image = /^!\[[^\]]*\]\([^)]*\)/.exec(rest);
+        if (image) {
+          buffer += image[0];
+          index += image[0].length;
+          continue;
+        }
+        if (rest[0] === '`') {
+          const code = /^`([^`\n]+)`/.exec(rest);
+          if (code) {
+            flush();
+            nodes.push(h('code', { key: 'code' + String(nodes.length) }, code[1]));
+            index += code[0].length;
+            continue;
+          }
+        }
+        const link = /^\[([^\]\n]+)\]\(([^()\s]+)\)/.exec(rest);
+        if (link) {
+          flush();
+          const href = safeMarkdownHref(link[2]);
+          if (href) {
+            nodes.push(
+              h('a', { key: 'link' + String(nodes.length), href, target: '_blank', rel: 'noreferrer noopener' }, link[1]),
+            );
+          } else {
+            nodes.push(link[1]);
+          }
+          index += link[0].length;
+          continue;
+        }
+        if (level < 2 && rest.startsWith('**')) {
+          const bold = /^\*\*([^*\n]+)\*\*/.exec(rest);
+          if (bold) {
+            flush();
+            nodes.push(h('strong', { key: 'strong' + String(nodes.length) }, markdownInlineNodes(bold[1], level + 1)));
+            index += bold[0].length;
+            continue;
+          }
+        }
+        if (level < 2 && rest.startsWith('__')) {
+          const bold = /^__([^_\n]+)__/.exec(rest);
+          if (bold) {
+            flush();
+            nodes.push(h('strong', { key: 'strong' + String(nodes.length) }, markdownInlineNodes(bold[1], level + 1)));
+            index += bold[0].length;
+            continue;
+          }
+        }
+        if (level < 2 && rest.startsWith('~~')) {
+          const strike = /^~~([^~\n]+)~~/.exec(rest);
+          if (strike) {
+            flush();
+            nodes.push(h('del', { key: 'del' + String(nodes.length) }, markdownInlineNodes(strike[1], level + 1)));
+            index += strike[0].length;
+            continue;
+          }
+        }
+        if (level < 2 && (rest[0] === '*' || rest[0] === '_') && rest[1] !== rest[0]) {
+          const marker = rest[0];
+          const emphasis = new RegExp('^\\' + marker + '([^\\' + marker + '\\n]+)\\' + marker).exec(rest);
+          if (emphasis) {
+            flush();
+            nodes.push(h('em', { key: 'em' + String(nodes.length) }, markdownInlineNodes(emphasis[1], level + 1)));
+            index += emphasis[0].length;
+            continue;
+          }
+        }
+        buffer += source[index];
+        index += 1;
+      }
+      flush();
+      return nodes;
+    }
+
+    function markdownInlineLines(lines) {
+      const output = [];
+      for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+        if (lineIndex > 0) output.push(h('br', { key: 'br' + String(lineIndex) }));
+        const inline = markdownInlineNodes(lines[lineIndex], 0);
+        for (let nodeIndex = 0; nodeIndex < inline.length; nodeIndex += 1) output.push(inline[nodeIndex]);
+      }
+      return output;
+    }
+
+    const MARKDOWN_BLOCK_START = /^\s*(#{1,6}\s+|```|~~~|>|[-*+]\s+|\d+[.)]\s+)/;
+
+    function markdownBlocksFromLines(lines) {
+      const blocks = [];
+      let index = 0;
+      let seq = 0;
+      const key = (prefix) => prefix + String((seq += 1));
+      const isBlank = (line) => /^\s*$/.test(line);
+      const isTableSeparator = (line) =>
+        /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)+\|?\s*$/.test(line);
+      while (index < lines.length) {
+        const line = lines[index];
+        if (isBlank(line)) {
+          index += 1;
+          continue;
+        }
+        const fence = /^\s*(```+|~~~+)\s*([\w#+.-]*)\s*$/.exec(line);
+        if (fence) {
+          const marker = fence[1];
+          const closed = new RegExp('^\\s*' + marker[0] + '{3,}\\s*$');
+          const body = [];
+          index += 1;
+          while (index < lines.length && !closed.test(lines[index])) {
+            body.push(lines[index]);
+            index += 1;
+          }
+          if (index < lines.length) index += 1;
+          blocks.push(h('pre', { key: key('pre'), className: 'pl-md-code' }, h('code', null, body.join('\n'))));
+          continue;
+        }
+        const heading = /^\s*(#{1,6})\s+(.*)$/.exec(line);
+        if (heading) {
+          const tag = 'h' + String(Math.min(6, heading[1].length));
+          blocks.push(h(tag, { key: key('h'), className: 'pl-md-heading' }, markdownInlineNodes(heading[2])));
+          index += 1;
+          continue;
+        }
+        if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(line)) {
+          blocks.push(h('hr', { key: key('hr') }));
+          index += 1;
+          continue;
+        }
+        if (/^\s*>/.test(line)) {
+          const quoted = [];
+          while (index < lines.length && /^\s*>/.test(lines[index])) {
+            quoted.push(lines[index].replace(/^\s*>\s?/, ''));
+            index += 1;
+          }
+          blocks.push(
+            h('blockquote', { key: key('quote'), className: 'pl-md-quote' }, markdownBlocksFromLines(quoted)),
+          );
+          continue;
+        }
+        const listItem = /^(\s*)([-*+]|\d+[.)])\s+(.*)$/.exec(line);
+        if (listItem) {
+          const ordered = /\d/.test(listItem[2][0]);
+          const items = [];
+          while (index < lines.length) {
+            const match = /^(\s*)([-*+]|\d+[.)])\s+(.*)$/.exec(lines[index]);
+            if (!match || /\d/.test(match[2][0]) !== ordered) break;
+            const itemLines = [match[3]];
+            index += 1;
+            while (index < lines.length && !isBlank(lines[index])) {
+              if (/^\s*([-*+]|\d+[.)])\s+/.test(lines[index])) break;
+              const continuation = /^\s{2,}(.*)$/.exec(lines[index]);
+              if (!continuation) break;
+              itemLines.push(continuation[1]);
+              index += 1;
+            }
+            items.push(h('li', { key: key('li') }, markdownInlineLines(itemLines)));
+          }
+          blocks.push(h(ordered ? 'ol' : 'ul', { key: key('list') }, items));
+          continue;
+        }
+        if (line.indexOf('|') !== -1 && index + 1 < lines.length && isTableSeparator(lines[index + 1])) {
+          const splitRow = (row) => {
+            let value = row.trim();
+            if (value.startsWith('|')) value = value.slice(1);
+            if (value.endsWith('|')) value = value.slice(0, -1);
+            return value.split('|').map((cell) => cell.trim());
+          };
+          const headerCells = splitRow(line);
+          index += 2;
+          const bodyRows = [];
+          while (index < lines.length && !isBlank(lines[index]) && lines[index].indexOf('|') !== -1) {
+            bodyRows.push(splitRow(lines[index]));
+            index += 1;
+          }
+          blocks.push(
+            h(
+              'table',
+              { key: key('table'), className: 'pl-md-table' },
+              h(
+                'thead',
+                { key: 'thead' },
+                h(
+                  'tr',
+                  { key: 'head-row' },
+                  headerCells.map((cell, cellIndex) =>
+                    h('th', { key: 'th' + String(cellIndex) }, markdownInlineNodes(cell)),
+                  ),
+                ),
+              ),
+              bodyRows.length
+                ? h(
+                    'tbody',
+                    { key: 'tbody' },
+                    bodyRows.map((cells, rowIndex) =>
+                      h(
+                        'tr',
+                        { key: key('row') },
+                        headerCells.map((_, cellIndex) =>
+                          h(
+                            'td',
+                            { key: 'td' + String(cellIndex) },
+                            markdownInlineNodes(cells[cellIndex] === undefined ? '' : cells[cellIndex]),
+                          ),
+                        ),
+                      ),
+                    ),
+                  )
+                : null,
+            ),
+          );
+          continue;
+        }
+        const paragraph = [line];
+        index += 1;
+        while (index < lines.length) {
+          const next = lines[index];
+          if (isBlank(next)) break;
+          if (MARKDOWN_BLOCK_START.test(next)) break;
+          if (next.indexOf('|') !== -1 && index + 1 < lines.length && isTableSeparator(lines[index + 1])) break;
+          paragraph.push(next);
+          index += 1;
+        }
+        blocks.push(h('p', { key: key('p') }, markdownInlineLines(paragraph)));
+      }
+      return blocks;
+    }
+
+    function renderMarkdownBlocks(text) {
+      const source = String(text === null || text === undefined ? '' : text).replace(/\r\n?/g, '\n');
+      if (!source.trim()) return [];
+      return markdownBlocksFromLines(source.split('\n'));
+    }
+
+    function MarkdownView(props) {
+      const text = String(props.text === null || props.text === undefined ? '' : props.text);
+      const nodes = React.useMemo(() => renderMarkdownBlocks(text), [text]);
+      return h(
+        'div',
+        { className: 'pl-markdown' + (props.className ? ' ' + props.className : '') },
+        nodes.length ? nodes : h('p', { className: 'pl-muted' }, ''),
+      );
+    }
+
+    function BodyViewToggle(props) {
+      const mode = props.mode === 'markdown' ? 'markdown' : 'plain';
+      const onChange = typeof props.onChange === 'function' ? props.onChange : () => {};
+      const t = props.t;
+      return h(
+        'div',
+        { className: 'pl-bodyview', role: 'group', 'aria-label': t('common.bodyView') },
+        h(
+          'button',
+          {
+            type: 'button',
+            className: 'pl-bodyview-btn' + (mode === 'plain' ? ' pl-bodyview-on' : ''),
+            'aria-pressed': mode === 'plain',
+            onClick: () => onChange('plain'),
+          },
+          t('common.bodyRaw'),
+        ),
+        h(
+          'button',
+          {
+            type: 'button',
+            className: 'pl-bodyview-btn' + (mode === 'markdown' ? ' pl-bodyview-on' : ''),
+            'aria-pressed': mode === 'markdown',
+            onClick: () => onChange('markdown'),
+          },
+          t('common.bodyRendered'),
+        ),
+      );
+    }
+
+    /** Persisted per-browser body display preference; plain text by default. */
+    function useBodyRenderMode(store) {
+      const [mode, setMode] = React.useState(() => {
+        try {
+          const prefs = store && typeof store.readUiPrefs === 'function' ? store.readUiPrefs() : null;
+          return prefs && prefs.bodyRender === 'markdown' ? 'markdown' : 'plain';
+        } catch (error) {
+          return 'plain';
+        }
+      });
+      const change = React.useCallback(
+        (next) => {
+          const value = next === 'markdown' ? 'markdown' : 'plain';
+          setMode(value);
+          try {
+            if (store && typeof store.writeUiPrefs === 'function') store.writeUiPrefs({ bodyRender: value });
+          } catch (error) {
+            /* preference persistence is best effort */
+          }
+        },
+        [store],
+      );
+      return [mode, change];
+    }
+
+    /* ------------------------------------------------------------------ */
     /* Styles                                                              */
     /* ------------------------------------------------------------------ */
 
@@ -6307,6 +6687,29 @@ function PromptLibraryQuickEntry(props) {
       '.pl-star-hit:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px;border-radius:3px}',
       '.pl-star-current{font-size:12.5px;color:var(--dsw-alias-label-secondary)}',
       '.pl-root button:focus-visible,.pl-root input:focus-visible,.pl-root textarea:focus-visible,.pl-root select:focus-visible,.pl-overlay button:focus-visible,.pl-overlay input:focus-visible,.pl-overlay textarea:focus-visible,.pl-overlay select:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}',
+      '.pl-bodyview{display:inline-flex;gap:2px;padding:2px;border:.5px solid var(--dsw-alias-border-l1);border-radius:8px;background:var(--dsw-alias-bg-layer-1)}',
+      '.pl-bodyview-btn{min-height:24px;padding:0 9px;border:0;border-radius:6px;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:11.5px;cursor:pointer}',
+      '.pl-bodyview-btn:hover{color:var(--dsw-alias-label-primary)}',
+      '.pl-bodyview-on,.pl-bodyview-on:hover{background:color-mix(in srgb,var(--dsw-alias-brand-primary) 12%,transparent);color:var(--dsw-alias-brand-primary);font-weight:500}',
+      '.pl-bodyview:focus-visible,.pl-bodyview-btn:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}',
+      '.pl-markdown{font-size:12.8px;line-height:1.7;color:var(--dsw-alias-label-primary);overflow-wrap:anywhere}',
+      '.pl-markdown>*:first-child{margin-top:0}',
+      '.pl-markdown p{margin:0 0 .7em}',
+      '.pl-markdown .pl-md-heading{margin:.9em 0 .45em;font-weight:600;line-height:1.35}',
+      '.pl-markdown h1,.pl-markdown h2{font-size:1.28em}',
+      '.pl-markdown h3,.pl-markdown h4{font-size:1.14em}',
+      '.pl-markdown h5,.pl-markdown h6{font-size:1.02em}',
+      '.pl-markdown ul,.pl-markdown ol{margin:.2em 0 .8em;padding-left:1.5em}',
+      '.pl-markdown li{margin:.15em 0}',
+      '.pl-markdown .pl-md-code{margin:.4em 0 .9em;padding:9px 10px;border-radius:8px;background:var(--dsw-alias-bg-layer-1);overflow:auto;font:12px/1.6 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre}',
+      '.pl-markdown code{padding:1px 4px;border-radius:4px;background:var(--dsw-alias-bg-layer-2);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px}',
+      '.pl-markdown .pl-md-code code{padding:0;background:transparent}',
+      '.pl-markdown .pl-md-quote{margin:.4em 0 .9em;padding:2px 10px;border-left:2.5px solid var(--dsw-alias-border-l2);color:var(--dsw-alias-label-secondary)}',
+      '.pl-markdown .pl-md-table{display:block;max-width:100%;overflow:auto;margin:.4em 0 .9em;border-collapse:collapse;font-size:12.3px}',
+      '.pl-markdown .pl-md-table th,.pl-markdown .pl-md-table td{border:.5px solid var(--dsw-alias-border-l1);padding:4px 8px;text-align:left;vertical-align:top}',
+      '.pl-markdown .pl-md-table th{background:var(--dsw-alias-bg-layer-1);font-weight:600}',
+      '.pl-markdown a{color:var(--dsw-alias-brand-primary);text-decoration:underline}',
+      '.pl-markdown hr{margin:.8em 0;border:0;border-top:.5px solid var(--dsw-alias-border-l1)}',
     ].join('');
 
     function installStyles() {

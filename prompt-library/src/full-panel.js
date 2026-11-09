@@ -515,6 +515,9 @@ const FULL_PANEL_CSS = [
   '.pl-detail-tags{display:flex;flex-wrap:wrap;align-items:center;gap:5px;margin:8px 0 0}',
   '.pl-detail-section{margin:18px 0 0;padding:14px;border:.5px solid var(--dsw-alias-border-l1);border-radius:11px;background:var(--dsw-alias-bg-layer-1)}',
   '.pl-section-title{margin:0 0 10px;font-size:12.5px;font-weight:600;letter-spacing:.02em;color:var(--dsw-alias-label-secondary)}',
+  '.pl-section-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 0 10px}',
+  '.pl-section-title-inline{margin:0}',
+  '.pl-detail-body-md{font-family:inherit;white-space:normal;font-size:13px;line-height:1.7}',
   '.pl-detail-body{margin:0;max-height:46vh;overflow:auto;padding:10px;border-radius:8px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font:12.8px/1.65 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere}',
   '.pl-detail-usage{margin:0;color:var(--dsw-alias-label-primary);font-size:12.8px;line-height:1.65;white-space:pre-wrap;overflow-wrap:anywhere}',
   '.pl-field{margin:0 0 14px}',
@@ -1255,6 +1258,7 @@ function FPDetail(props) {
   const [rateAfterUse, setRateAfterUse] = React.useState(false);
   const [copyNotice, setCopyNotice] = React.useState(null);
   const [aiDeleteOpen, setAiDeleteOpen] = React.useState(false);
+  const [bodyMode, setBodyMode] = useBodyRenderMode(store);
   const tags = tagsForPrompt(data, prompt);
   const localeId = fpActiveLocale(locale);
   const created = formatDateTime(prompt.createdAt, localeId);
@@ -1390,8 +1394,18 @@ function FPDetail(props) {
     h(
       'div',
       { className: 'pl-detail-section' },
-      h('h3', { className: 'pl-section-title' }, t('full.detail.bodyTitle')),
-      h('pre', { className: 'pl-detail-body' }, prompt.body),
+      h(
+        'div',
+        { className: 'pl-section-head' },
+        h('h3', { className: 'pl-section-title pl-section-title-inline' }, t('full.detail.bodyTitle')),
+        h(BodyViewToggle, { mode: bodyMode, onChange: setBodyMode, t }),
+      ),
+      bodyMode === 'markdown'
+        ? h(MarkdownView, { text: prompt.body, className: 'pl-detail-body pl-detail-body-md' })
+        : h('pre', { className: 'pl-detail-body' }, prompt.body),
+      bodyMode === 'markdown'
+        ? h('p', { className: 'pl-field-hint' }, t('common.markdownHint'))
+        : null,
     ),
     prompt.usage
       ? h(
