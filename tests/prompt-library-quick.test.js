@@ -245,24 +245,35 @@ test('entry button: dialog a11y attributes, label, and no draft mutation', () =>
 /* 2. Quick access sections and ratings                                */
 /* ------------------------------------------------------------------ */
 
-test('empty search shows pinned / favorites / recently-used sections with counts and ratings', () => {
+test('quick picker offers 全部/置顶/收藏/最近使用 tabs and defaults to all prompts', () => {
   const h = makeHarness();
   h.renderQuick();
   openPanel(h);
 
+  const tabs = h.all('button').filter((node) => node.props && node.props.role === 'tab');
+  assert.deepEqual(
+    tabs.map((node) => h.text(node).replace(/\d+/g, '').trim()),
+    ['全部', '置顶', '收藏', '最近使用'],
+    'four category tabs',
+  );
+  assert.deepEqual(
+    tabs.map((node) => node.props['aria-selected']),
+    [true, false, false, false],
+    'all prompts is the default tab',
+  );
   const text = h.text();
-  assert.ok(text.includes('置顶'), 'pinned section');
-  assert.ok(text.includes('收藏'), 'favorites section');
-  assert.ok(text.includes('最近使用'), 'recent section');
+  assert.ok(text.includes('全部'), 'all tab label');
+  assert.ok(text.includes('置顶'), 'pinned tab label');
+  assert.ok(text.includes('收藏'), 'favorites tab label');
+  assert.ok(text.includes('最近使用'), 'recent tab label');
 
-  // Section rows: exactly the three quick-access prompts (plain ones excluded).
-  const listRows = rows(h);
-  assert.equal(listRows.length, 3);
+  // Default "All": every prompt is reachable, including plain ones.
+  assert.equal(rows(h).length, 5);
   assert.ok(rowTitle(h, '润色置顶'));
   assert.ok(rowTitle(h, '代码审查'));
   assert.ok(rowTitle(h, '邮件回复'));
-  assert.equal(rowTitle(h, '翻译助手'), undefined, 'non-pinned/favorite/recent prompt hidden');
-  assert.equal(rowTitle(h, 'Meeting Notes'), undefined);
+  assert.ok(rowTitle(h, '翻译助手'), 'plain prompt is visible under All');
+  assert.ok(rowTitle(h, 'Meeting Notes'));
 
   // No row selected yet -> the preview shows an explicit empty state.
   assert.ok(text.includes('选择一条提示词查看正文'), 'no-selection preview empty state');
@@ -284,10 +295,42 @@ test('empty search shows pinned / favorites / recently-used sections with counts
   assert.ok(
     h.descendants(favRow, (node) => node.props && node.props['aria-label'] === '已收藏').length > 0,
   );
+
+  // Category tabs filter the list; counts stay visible.
+  h.clickButton('置顶1');
+  assert.equal(rows(h).length, 1);
+  assert.ok(rowTitle(h, '润色置顶'));
+  h.clickButton('收藏1');
+  assert.equal(rows(h).length, 1);
+  assert.ok(rowTitle(h, '代码审查'));
+  h.clickButton('最近使用1');
+  assert.equal(rows(h).length, 1);
+  assert.ok(rowTitle(h, '邮件回复'));
+  h.clickButton('全部5');
+  assert.equal(rows(h).length, 5);
+
+  // Keyboard: arrow keys move the selected tab (roving focus).
+  const tablist = h.all('div').find((node) => node.props && node.props.role === 'tablist');
+  assert.ok(tablist);
+  let prevented = false;
+  tablist.props.onKeyDown({
+    key: 'ArrowRight',
+    preventDefault() {
+      prevented = true;
+    },
+  });
+  h.render();
+  assert.equal(prevented, true);
+  const afterArrow = h.all('button').filter((node) => node.props && node.props.role === 'tab');
+  assert.deepEqual(
+    afterArrow.map((node) => node.props['aria-selected']),
+    [false, true, false, false],
+    'ArrowRight selects 置顶',
+  );
   h.dispose();
 });
 
-test('prompts outside the quick-access categories fall back to an all-prompts section', () => {
+test('a prompt outside quick-access categories is visible under All, and an empty tab offers 查看全部', () => {
   const storage = {
     [DATA_KEY]: JSON.stringify({
       version: 1,
@@ -299,7 +342,14 @@ test('prompts outside the quick-access categories fall back to an all-prompts se
   h.renderQuick();
   openPanel(h);
 
-  assert.ok(h.text().includes('全部提示词'), 'all-prompts fallback section');
+  assert.equal(rows(h).length, 1, 'All shows prompts that are not pinned/favorite/recent');
+  assert.ok(rowTitle(h, '唯一的提示词'));
+
+  // Recent tab is empty for this prompt and offers a way back to All.
+  h.clickButton('最近使用0');
+  assert.equal(rows(h).length, 0);
+  assert.ok(h.text().includes('这个分类还没有提示词'));
+  h.clickButton('查看全部');
   assert.equal(rows(h).length, 1);
   assert.ok(rowTitle(h, '唯一的提示词'));
   h.dispose();
@@ -602,7 +652,7 @@ test('no search results show a clear-search action that restores quick access', 
   const h = makeHarness();
   h.renderQuick();
   openPanel(h);
-  assert.equal(rows(h).length, 3);
+  assert.equal(rows(h).length, 5);
 
   h.change(h.findInput('搜索提示词'), 'zzz-没有这个');
   assert.equal(rows(h).length, 0);
@@ -610,7 +660,7 @@ test('no search results show a clear-search action that restores quick access', 
 
   h.clickButton('清除搜索');
   assert.equal(h.findInput('搜索提示词').props.value, '');
-  assert.equal(rows(h).length, 3, 'quick access restored');
+  assert.equal(rows(h).length, 5, 'all prompts restored');
   h.dispose();
 });
 
@@ -645,9 +695,10 @@ test('english locale renders the quick picker in English', () => {
 
   const text = h.text();
   assert.ok(text.includes('Prompt Library · Quick picker'));
+  assert.ok(text.includes('All'));
   assert.ok(text.includes('Pinned'));
   assert.ok(text.includes('Favorites'));
-  assert.ok(text.includes('Recently used'));
+  assert.ok(text.includes('Recent'));
   assert.equal(h.findInput('Search prompts').props.placeholder, 'Search titles, text or tags');
   rowById(h, 'p-pinned').props.onClick({});
   h.render();
@@ -723,6 +774,29 @@ function renderSelectionAction(h, props) {
 /* ------------------------------------------------------------------ */
 /* 11. Composer "save draft" capture entry                             */
 /* ------------------------------------------------------------------ */
+
+test('closing the panel does not re-open the entry hover tooltip', () => {
+  const h = makeHarness();
+  h.renderQuick();
+
+  // Opening the panel happens through the entry button.
+  openPanel(h);
+  assert.ok(h.text().includes('提示库 · 快捷选择'));
+
+  // Close it; focus restoration used to immediately show the tooltip again.
+  h.pressEscape();
+  const wrapper = hoverTipWrappers(h)[0];
+  assert.ok(wrapper, 'entry hover wrapper remains');
+  wrapper.props.onFocus({ type: 'focus' });
+  wrapper.props.onMouseEnter({ type: 'mouseenter' });
+  h.render();
+  assert.equal(
+    h.all('div').some((node) => node.props && node.props.role === 'tooltip'),
+    false,
+    'tooltip stays hidden right after closing the panel',
+  );
+  h.dispose();
+});
 
 test('save-draft entry: button a11y + whole-draft snapshot and no composer mutation', () => {
   const h = makeHarness();

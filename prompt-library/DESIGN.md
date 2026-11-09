@@ -546,7 +546,7 @@ function createStore({ storage, uuid, now })
 10. **样式与测试**：UI 片段各自持有 `FULL_PANEL_CSS`/`QUICK_PICKER_CSS`，骨架注入一个
    `data-dsh-plugin="prompt-library"` 的 `<style>` 并随卸载移除；测试用
    `tests/helpers/prompt-library-harness.js` 的假 React/portal/document/locale/fetch 渲染真实
-   组件树。当前测试：提示库 143 项（core 47、host 28、panel 28、quick 20、integration 20），全量 218/218（含既有插件，其中有并发新增的番茄时钟测试，未受影响）。
+   组件树。当前测试：提示库 215 项（core 47、host 28、capture-core 30、panel 42、quick 33、integration 35）；整仓库回归会受工作区中 knowledge-tree 在建改动影响，提示库套件独立全绿。
 
 ## 9. 快速收录（quick capture）实现契约 v1（2026-11 增补）
 
@@ -684,3 +684,11 @@ AI 辅助整理/改写（可选增强，不在首版）；来源消息精确跳�
    输入框草稿收录通过 `conversation.input.right` 第二入口 `id:'prompt-library-save-draft'`；
    两者均不在插件内操作宿主 DOM。来源会话跳转使用 `ctx.uiWorkspace.openSession`，失败就地反馈。
 7. 自动标题按总预算截断：超过 40 个可见字符时保留 39 个可见字符 + `…`（省略号计入 40）。
+
+
+### 9.8 快捷面板分类页签
+
+快捷面板（`conversation.input.right` 打开的选择面板）把原「置顶 / 收藏 / 最近使用」分段展示升级为四个页签：
+「全部 / 置顶 / 收藏 / 最近使用」，默认「全部」，各页签带数量；搜索时页签让位给匹配结果；
+空分类显示「这个分类还没有提示词」与「查看全部」；页签为 ARIA tablist，支持 ←/→/Home/End 键盘切换。
+关闭面板后 600ms 内抑制入口 tooltip，避免焦点恢复（Modal 关闭时把焦点还给按钮）导致介绍又弹出来。

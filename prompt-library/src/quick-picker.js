@@ -57,6 +57,15 @@ const QUICK_PICKER_CSS = [
   '.plq-rate-later{flex:none;margin-left:auto}',
   '.plq-body{display:grid;grid-template-columns:minmax(220px,1fr) minmax(0,1.35fr);gap:12px;min-height:0;align-items:stretch}',
   '.plq-list-col{display:flex;flex-direction:column;min-width:0;min-height:0}',
+  '.plq-tabs{display:flex;gap:2px;margin:0 0 6px;padding:2px;border:.5px solid var(--dsw-alias-border-l1);border-radius:9px;background:var(--dsw-alias-bg-layer-1);overflow:auto}',
+  '.plq-tab{display:inline-flex;flex:1;align-items:center;justify-content:center;gap:4px;min-height:26px;padding:0 8px;border:0;border-radius:7px;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:12px;line-height:1;white-space:nowrap;cursor:pointer}',
+  '.plq-tab:hover{color:var(--dsw-alias-label-primary)}',
+  '.plq-tab-on,.plq-tab-on:hover{background:color-mix(in srgb,var(--dsw-alias-brand-primary) 12%,transparent);color:var(--dsw-alias-brand-primary);font-weight:500}',
+  '.plq-tab:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}',
+  '.plq-tab-count{min-width:13px;text-align:center;font-size:10.5px;font-variant-numeric:tabular-nums;color:var(--dsw-alias-label-secondary)}',
+  '.plq-tab-on .plq-tab-count{color:var(--dsw-alias-brand-primary)}',
+  '.plq-tab-empty{display:flex;flex-direction:column;align-items:flex-start;gap:6px;padding:18px 12px;color:var(--dsw-alias-label-secondary)}',
+  '.plq-tab-empty-title{margin:0;font-size:13px;font-weight:600;color:var(--dsw-alias-label-primary)}',
   '.plq-list{display:flex;flex-direction:column;gap:2px;overflow:auto;overscroll-behavior:contain;max-height:min(52vh,420px);padding-right:2px}',
   '.plq-section{margin:0 0 6px}',
   '.plq-section-head{display:flex;align-items:center;gap:6px;margin:0;padding:6px 8px 4px;font-size:11.5px;font-weight:600;letter-spacing:.02em;color:var(--dsw-alias-label-secondary)}',
@@ -107,6 +116,15 @@ const QUICK_PICKER_DICT = {
     'quick.sectionFavorite': '收藏',
     'quick.sectionRecent': '最近使用',
     'quick.sectionAll': '全部提示词',
+    'quick.tabsLabel': '提示词分类',
+    'quick.tabAll': '全部',
+    'quick.tabPinned': '置顶',
+    'quick.tabFavorite': '收藏',
+    'quick.tabRecent': '最近使用',
+    'quick.tabCountAria': '{label}，{n} 条',
+    'quick.tabEmpty': '这个分类还没有提示词',
+    'quick.tabEmptyBody': '切换到「全部」查看所有提示词。',
+    'quick.viewAll': '查看全部',
     'quick.sectionResults': '匹配结果',
     'quick.selectPrompt': '选择提示词：{title}',
     'quick.pinned': '已置顶',
@@ -152,6 +170,15 @@ const QUICK_PICKER_DICT = {
     'quick.sectionFavorite': 'Favorites',
     'quick.sectionRecent': 'Recently used',
     'quick.sectionAll': 'All prompts',
+    'quick.tabsLabel': 'Prompt categories',
+    'quick.tabAll': 'All',
+    'quick.tabPinned': 'Pinned',
+    'quick.tabFavorite': 'Favorites',
+    'quick.tabRecent': 'Recent',
+    'quick.tabCountAria': '{label}, {n} prompts',
+    'quick.tabEmpty': 'Nothing in this category yet',
+    'quick.tabEmptyBody': 'Switch to "All" to browse every prompt.',
+    'quick.viewAll': 'View all',
     'quick.sectionResults': 'Results',
     'quick.selectPrompt': 'Select prompt: {title}',
     'quick.pinned': 'Pinned',
@@ -191,35 +218,52 @@ const QUICK_PICKER_DICT = {
 /* Pure view-model helpers (QP prefix keeps names unique in the bundle) */
 /* ------------------------------------------------------------------ */
 
-/** Sections shown while the search box is empty: pinned, favorites, recent. */
-function QPQuickSections(data) {
+/** Quick-picker categories, rendered as tabs above the list. */
+const QP_TABS = [
+  { id: 'all', labelKey: 'quick.tabAll' },
+  { id: 'pinned', labelKey: 'quick.tabPinned' },
+  { id: 'favorites', labelKey: 'quick.tabFavorite' },
+  { id: 'recent', labelKey: 'quick.tabRecent' },
+];
+
+/** Prompts shown by one tab; pinned prompts stay first inside "All". */
+function QPQuickItems(data, tab) {
   const prompts = Array.isArray(data.prompts) ? data.prompts : [];
-  const pinned = sortPrompts(
-    prompts.filter((prompt) => prompt.pinned === true),
-    'default',
-  );
-  const shown = new Set(pinned.map((prompt) => prompt.id));
-  const favorites = sortPrompts(
-    prompts.filter((prompt) => prompt.favorite === true && !shown.has(prompt.id)),
-    'default',
-  );
-  for (const prompt of favorites) shown.add(prompt.id);
-  const recent = sortPrompts(
-    prompts.filter(
-      (prompt) =>
-        prompt.lastUsedAt !== null && prompt.lastUsedAt !== undefined && !shown.has(prompt.id),
-    ),
-    'recent',
-  ).slice(0, 20);
-  const sections = [
-    { key: 'pinned', titleKey: 'quick.sectionPinned', items: pinned },
-    { key: 'favorites', titleKey: 'quick.sectionFavorite', items: favorites },
-    { key: 'recent', titleKey: 'quick.sectionRecent', items: recent },
-  ].filter((section) => section.items.length > 0);
-  if (sections.length === 0 && prompts.length > 0) {
-    return [{ key: 'all', titleKey: 'quick.sectionAll', items: sortPrompts(prompts, 'default') }];
+  if (tab === 'pinned') {
+    return sortPrompts(
+      prompts.filter((prompt) => prompt.pinned === true),
+      'default',
+    );
   }
-  return sections;
+  if (tab === 'favorites') {
+    return sortPrompts(
+      prompts.filter((prompt) => prompt.favorite === true),
+      'default',
+    );
+  }
+  if (tab === 'recent') {
+    return sortPrompts(
+      prompts.filter(
+        (prompt) => prompt.lastUsedAt !== null && prompt.lastUsedAt !== undefined,
+      ),
+      'recent',
+    ).slice(0, 20);
+  }
+  return sortPrompts(prompts, 'default');
+}
+
+/** Per-tab counts (recent is capped at what the tab shows). */
+function QPQuickTabCounts(data) {
+  const prompts = Array.isArray(data.prompts) ? data.prompts : [];
+  const recent = prompts.filter(
+    (prompt) => prompt.lastUsedAt !== null && prompt.lastUsedAt !== undefined,
+  ).length;
+  return {
+    all: prompts.length,
+    pinned: prompts.filter((prompt) => prompt.pinned === true).length,
+    favorites: prompts.filter((prompt) => prompt.favorite === true).length,
+    recent: Math.min(recent, 20),
+  };
 }
 
 /** Search results use the default core ordering (pinned keeps priority). */
@@ -443,6 +487,8 @@ function QPHoverTip(props) {
   const wrapRef = React.useRef(null);
   const tipRef = React.useRef(null);
   const idRef = React.useRef(null);
+  const suppressRef = React.useRef(false);
+  suppressRef.current = props.suppress === true;
   if (idRef.current === null) {
     QP_TIP_SEQUENCE += 1;
     idRef.current = 'plq-tip-' + String(QP_TIP_SEQUENCE);
@@ -481,7 +527,7 @@ function QPHoverTip(props) {
   }, [open]);
 
   function show() {
-    if (!label) return;
+    if (!label || suppressRef.current) return;
     setCoords(null);
     setOpen(true);
   }
@@ -690,6 +736,10 @@ function PromptLibraryQuickEntry(props) {
   const [selectedId, setSelectedId] = React.useState(null);
   const [notice, setNotice] = React.useState(null);
   const [ratedId, setRatedId] = React.useState(null);
+  const [tab, setTab] = React.useState('all');
+  const tabRefs = React.useRef({});
+  const [tipSuppressed, setTipSuppressed] = React.useState(false);
+  const tipTimerRef = React.useRef(null);
   const [bodyMode, setBodyMode] = useBodyRenderMode(store);
 
   const entryRef = React.useRef(null);
@@ -716,7 +766,16 @@ function PromptLibraryQuickEntry(props) {
     setSelectedId(null);
     setNotice(null);
     setRatedId(null);
+    setTab('all');
   }, [sessionId]);
+
+  /* A tooltip must not pop up just because closing the panel restored focus. */
+  React.useEffect(
+    () => () => {
+      if (tipTimerRef.current) clearTimeout(tipTimerRef.current);
+    },
+    [],
+  );
 
   /* Success feedback is a short strip; clear its timer on unmount/change. */
   React.useEffect(() => {
@@ -731,11 +790,19 @@ function PromptLibraryQuickEntry(props) {
     setSelectedId(null);
     setNotice(null);
     setRatedId(null);
+    setTab('all');
   }
 
   function closePanel() {
     setOpen(false);
     resetPanelState();
+    setTipSuppressed(true);
+    if (tipTimerRef.current) clearTimeout(tipTimerRef.current);
+    tipTimerRef.current = setTimeout(() => {
+      tipTimerRef.current = null;
+      setTipSuppressed(false);
+    }, 600);
+    if (tipTimerRef.current && typeof tipTimerRef.current.unref === 'function') tipTimerRef.current.unref();
   }
 
   function openPanel() {
@@ -749,15 +816,11 @@ function PromptLibraryQuickEntry(props) {
   }
 
   const query = search.trim();
-  const sections = query === '' ? QPQuickSections(data) : [];
-  const results = query === '' ? [] : QPSearchResults(data, query);
-  const activeSections =
-    query === ''
-      ? sections
-      : results.length > 0
-        ? [{ key: 'results', titleKey: 'quick.sectionResults', items: results }]
-        : [];
-  const visible = activeSections.reduce((acc, section) => acc.concat(section.items), []);
+  const isSearching = query !== '';
+  const tabCounts = QPQuickTabCounts(data);
+  const tabItems = isSearching ? [] : QPQuickItems(data, tab);
+  const results = isSearching ? QPSearchResults(data, query) : [];
+  const visible = isSearching ? results : tabItems;
   const total = visible.length;
   const selected = selectedId
     ? data.prompts.find((prompt) => prompt.id === selectedId) || null
@@ -765,7 +828,72 @@ function PromptLibraryQuickEntry(props) {
   const ratedPrompt = ratedId
     ? data.prompts.find((prompt) => prompt.id === ratedId) || null
     : null;
-  const isSearching = query !== '';
+
+  function selectTab(nextTab) {
+    if (!QP_TABS.some((definition) => definition.id === nextTab)) return;
+    setTab(nextTab);
+    setSelectedId(null);
+  }
+
+  function onTabsKeyDown(event) {
+    if (!event || !event.key) return;
+    const order = QP_TABS.map((definition) => definition.id);
+    const currentIndex = Math.max(0, order.indexOf(tab));
+    let nextIndex;
+    if (event.key === 'ArrowRight') nextIndex = (currentIndex + 1) % order.length;
+    else if (event.key === 'ArrowLeft') nextIndex = (currentIndex - 1 + order.length) % order.length;
+    else if (event.key === 'Home') nextIndex = 0;
+    else if (event.key === 'End') nextIndex = order.length - 1;
+    else return;
+    if (typeof event.preventDefault === 'function') event.preventDefault();
+    const next = order[nextIndex];
+    selectTab(next);
+    const node = tabRefs.current[next];
+    if (node && typeof node.focus === 'function') {
+      try {
+        node.focus();
+      } catch (error) {
+        /* focus is best effort */
+      }
+    }
+  }
+
+  const tabsBar =
+    !isSearching && data.prompts.length > 0
+      ? h(
+          'div',
+          {
+            className: 'plq-tabs',
+            role: 'tablist',
+            'aria-label': t('quick.tabsLabel'),
+            onKeyDown: onTabsKeyDown,
+          },
+          QP_TABS.map((definition) => {
+            const active = tab === definition.id;
+            const count = tabCounts[definition.id] || 0;
+            return h(
+              'button',
+              {
+                key: definition.id,
+                ref: (node) => {
+                  tabRefs.current[definition.id] = node;
+                },
+                type: 'button',
+                role: 'tab',
+                id: 'plq-tab-' + definition.id,
+                'aria-selected': active,
+                'aria-controls': 'plq-list-panel',
+                'aria-label': t('quick.tabCountAria', { label: t(definition.labelKey), n: count }),
+                tabIndex: active ? 0 : -1,
+                className: 'plq-tab' + (active ? ' plq-tab-on' : ''),
+                onClick: () => selectTab(definition.id),
+              },
+              h('span', { className: 'plq-tab-label' }, t(definition.labelKey)),
+              h('span', { className: 'plq-tab-count', 'aria-hidden': 'true' }, String(count)),
+            );
+          }),
+        )
+      : null;
 
   function onSearchChange(event) {
     const value = event && event.target ? event.target.value : '';
@@ -891,7 +1019,7 @@ function PromptLibraryQuickEntry(props) {
     { ref: entryRef, className: 'plq-entry-wrap' },
     h(
       QPHoverTip,
-      { label: t('quick.entryTitle') },
+      { label: t('quick.entryTitle'), suppress: open || tipSuppressed },
       h(
         'button',
         {
@@ -945,36 +1073,66 @@ function PromptLibraryQuickEntry(props) {
       h(
         'div',
         { className: 'plq-list-col' },
+        tabsBar,
         h(
           'div',
           {
+            id: 'plq-list-panel',
             className: 'plq-list',
             'data-quick-list': 'true',
-            'aria-label': t('quick.listLabel'),
+            role: isSearching ? 'group' : 'tabpanel',
+            'aria-labelledby': isSearching ? undefined : 'plq-tab-' + tab,
+            'aria-label': isSearching ? t('quick.listLabel') : undefined,
             onKeyDown: onListKeyDown,
           },
-          activeSections.map((section) =>
-            h(
-              'div',
-              {
-                key: section.key,
-                className: 'plq-section',
-                role: 'group',
-                'aria-label': t(section.titleKey),
-              },
-              h(QPSectionHead, { label: t(section.titleKey), count: section.items.length }),
-              section.items.map((prompt) =>
-                h(QPRow, {
-                  key: prompt.id,
-                  prompt,
-                  selected: prompt.id === selectedId,
-                  t,
-                  tags: tagsForPrompt(data, prompt),
-                  onSelect,
+          isSearching
+            ? [
+                h(QPSectionHead, {
+                  key: 'results-head',
+                  label: t('quick.sectionResults'),
+                  count: results.length,
                 }),
-              ),
-            ),
-          ),
+                ...results.map((prompt) =>
+                  h(QPRow, {
+                    key: prompt.id,
+                    prompt,
+                    selected: prompt.id === selectedId,
+                    t,
+                    tags: tagsForPrompt(data, prompt),
+                    onSelect,
+                  }),
+                ),
+              ]
+            : tabItems.length > 0
+              ? tabItems.map((prompt) =>
+                  h(QPRow, {
+                    key: prompt.id,
+                    prompt,
+                    selected: prompt.id === selectedId,
+                    t,
+                    tags: tagsForPrompt(data, prompt),
+                    onSelect,
+                  }),
+                )
+              : [
+                  h(
+                    'div',
+                    { key: 'tab-empty', className: 'plq-tab-empty', role: 'status' },
+                    h('p', { className: 'plq-tab-empty-title' }, t('quick.tabEmpty')),
+                    h('p', { className: 'plq-hint' }, t('quick.tabEmptyBody')),
+                    tab !== 'all'
+                      ? h(
+                          'button',
+                          {
+                            type: 'button',
+                            className: 'pl-btn',
+                            onClick: () => selectTab('all'),
+                          },
+                          t('quick.viewAll'),
+                        )
+                      : null,
+                  ),
+                ],
         ),
       ),
       h(

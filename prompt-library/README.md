@@ -34,7 +34,8 @@ AI 辅助评价由用户主动触发，复用 DSH 已配置的模型服务，仅
 
 会话输入框工具栏新增「提示库」按钮，点击打开轻量选择面板（不离开当前会话）：
 
-- 快速访问置顶、收藏、最近使用；搜索标题/正文/标签；展示标题、标签和个人评分。
+- 分类页签：**全部 / 置顶 / 收藏 / 最近使用**（默认「全部」，带数量，键盘 ←/→ 可切换）；
+  搜索标题/正文/标签时自动展示匹配结果；每行展示标题、标签和个人评分。
 - 预览完整正文后，可「复制正文」或「插入输入框」（在光标/选区处插入，可撤销，不自动发送，
   不覆盖整份草稿）。
 - 复制/插入成功后显示不打断操作的「用后评分」入口。
@@ -212,11 +213,11 @@ node --test tests/*.test.js                  # 全仓库回归（不破坏既有
 | `tests/prompt-library-host.test.js` | 假 ctx 的两条路由：模型解析、请求只含 title/body/usage、无 tools/session、最低 reasoning effort 选择与缓存、超 200 压缩一次、空/错误/截断/超长/超时/并发上限/Origin 403、日志与响应不泄漏正文/密钥 | 28/28 |
 | `tests/prompt-library-panel.test.js` | 整页面板（含收件箱/整理状态/来源元数据/快速收录入口）：首用/空态、新建必填、编辑未保存确认、删除与标签删除二次确认、标签管理、收藏/置顶、排序与筛选、半星评分/备注/待复评/沿用、AI 状态/成功/失败/过期/草稿关联、复制与用后评分、CSV/JSON 导入预览与替换确认、导出/分享、corrupt/storage-error、窄窗口、i18n 与无障碍 | 28/28 |
 | `tests/prompt-library-capture-core.test.js` | 自动标题（首个非空行/去掉 markdown 标记/40 可见字符含省略号/不修改正文）、重复判定（exact vs 仅首尾空白/CRLF 的 near；内部空格与大小写不误判）、organize 迁移与切换不改 updatedAt、capture 规范化、收件箱过滤、CSV 新列与旧文件兼容、JSON 保留新元数据 | 30/30 |
-| `tests/prompt-library-quick.test.js` | 快捷入口：分区与搜索、复制/插入成功与失败、无插入接口降级、用后评分、键盘、Esc、会话切换安全、空态/无结果、i18n、存草稿快照与空禁用、选区收录、收录入口 payload/busy | 32/32 |
+| `tests/prompt-library-quick.test.js` | 快捷入口：分类页签（全部/置顶/收藏/最近使用）、计数与键盘切换、搜索、复制/插入成功与失败、无插入接口降级、用后评分、键盘、Esc、会话切换安全、空态/无结果、i18n、存草稿快照与空禁用、选区收录、收录入口 payload/busy、关闭面板不复现 tooltip | 33/33 |
 | `tests/prompt-library-integration.test.js` | 三个槽位注册、中英字典 parity、样式注入与卸载清理、corrupt/新版本/不可用存储不被覆盖、跨标签页刷新、layout 打开整页、下载内容、备注自动保存、Markdown 预览开关/安全渲染/原文复制与偏好持久化、快速收录（粘贴/整份草稿/对话选区/自动标题/重复 exact+near/仍然另存/连续收录/保存失败/IME/Esc/防双提交/来源会话快照/收件箱与来源元数据/查看跳转） | 35/35 |
 
 全量回归：`node prompt-library/build-client.mjs && node --test tests/*.test.js`
-→ **290/290 通过**（其中提示库 **214 项**，含 core 47、host 28、capture-core 30、panel 42、quick 32、integration 35；既有番茄时钟 / 九宫格 / 待办清单 / 知识树测试未破坏）。
+→ **提示库 215/215 通过**（core 47、host 28、capture-core 30、panel 42、quick 33、integration 35）。整仓库同时运行时会包含工作区中尚未提交的 knowledge-tree 在建改动，其失败与提示库无关。
 另有 `node --check` 覆盖 `client.js`、`core.js`、`index.js`、两个 UI 片段。
 
 **已验证**：上述自动化行为（含 localStorage 持久化、复制/插入 API 调用与拒绝路径、评分版本、
