@@ -8,7 +8,7 @@ import { canonicalStringify } from '../knowledge-tree/library.js';
 // detached records, CAS revisions, ignored snapshot reasons, and copy-only restore.
 // No browser/DOM/dependency installation is required.
 const clone = (value) => value == null ? value : structuredClone(value);
-const config = { owner: 'owner', repo: 'repo', branch: 'main', directory: 'knowledge-trees' };
+const config = { remote: 'git@github.com:owner/repo.git', branch: 'main', directory: 'knowledge-trees' };
 const prefix = JSON.stringify(Object.values(config)) + '/';
 const hash = (value) => createHash('sha256').update(canonicalStringify(value)).digest('hex');
 const doc = (title = '本地', image = false) => ({ version: 3, stage: 'brainstorm', title,
@@ -22,15 +22,13 @@ function harness(initial = [], remotes = {}, options = {}) {
   const records = new Map(initial.map((item) => [item.id, clone(item)]));
   const cached = new Map((options.cache || []).map((item) => [item.remoteKey, clone(item)]));
   const snapshots = new Map(), stores = new Map(), calls = [], settings = new Map();
-  let sessionToken = true;
   const React = {
     createElement(type, props, ...children) { return { type, props: props || {}, children: children.flat(Infinity).filter((child) => child !== false && child != null) }; },
     useState(value) { const i = si++; if (!(i in states)) states[i] = value; return [states[i], (next) => { states[i] = typeof next === 'function' ? next(states[i]) : next; }]; },
     useRef(value) { const i = ri++; if (!(i in refs)) refs[i] = { current: value }; return refs[i]; },
     useEffect(effect) { const i = ei++; if (!(i in effects)) effects[i] = effect; },
   };
-  const status = () => ({ configured: true, config: clone(config), credentialAvailable: sessionToken || !!options.envToken,
-    credentialSource: sessionToken ? 'session' : options.envToken ? 'environment' : null });
+  const status = () => ({ configured: true, config: clone(config), transport: 'ssh', gitAvailable: true });
   const library = {
     async init() { return clone([...records.values()]); },
     async listLocal() { return clone([...records.values()]); },
@@ -72,7 +70,7 @@ function harness(initial = [], remotes = {}, options = {}) {
     calls.push({ method, input: clone(input) });
     if (method === 'status') return status();
     if (method === 'configure') return status();
-    if (method === 'disconnect') { sessionToken = false; return status(); }
+    if (method === 'check') return { ok: true, remote: config.remote, branch: config.branch, commitSha: 'a'.repeat(40) };
     if (method === 'hashDocument') { if (h.hashHook) await h.hashHook(input.document); return { hash: hash(input.document) }; }
     if (method === 'listTrees') return Object.entries(remotes).map(([treeId, document]) => ({ treeId, title: document.title }));
     if (method === 'readTree') {
@@ -214,7 +212,7 @@ test('successful Push with metadata storage failure is explicitly distinguished 
   const h = harness([record('a', doc('上传成功'))]); h.failMetadata = true;
   await h.start(); await h.push();
   assert.equal(h.calls.filter((call) => call.method === 'pushTree').length, 1);
-  assert.match(h.text(), /GitHub 推送已成功，但本地同步基线记录失败/);
+  assert.match(h.text(), /远端推送已成功，但本地同步基线记录失败/);
   assert.match(h.text(), /metadata quota failure/);
 });
 
@@ -240,28 +238,28 @@ test('remote document hash and Pull body stay raw; editor-only image normalizati
   assert.equal(h.records.get('r').sync.baseHash, hash(h.records.get('r').document));
 });
 
-test('required directory and PAT disclosure match session-only Host credentials', async () => {
-  const h = harness(); await h.start(); await h.click('GitHub 配置');
+test('required SSH remote, branch and directory fields are enforced, with SSH setup disclosure', async () => {
+  const h = harness(); await h.start(); await h.click('SSH 配置');
   const directory = h.all('label').find((node) => h.text(node) === '目录').children.find((node) => node.type === 'input');
   assert.equal(directory.props.required, true);
+  const remote = h.all('label').find((node) => h.text(node).includes('SSH 远端地址')).children.find((node) => node.type === 'input');
+  remote.props.onChange({ target: { value: 'https://github.com/owner/repo.git' } }); await h.tick();
   directory.props.onChange({ target: { value: ' ' } }); await h.tick();
   h.all('form')[0].props.onSubmit({ preventDefault() {} }); await h.tick();
   assert.equal(h.calls.some((call) => call.method === 'configure'), false);
   assert.match(h.text(), /请填写.*目录/);
-  assert.match(h.text(), /KNOWLEDGE_TREE_GITHUB_TOKEN/);
-  assert.match(h.text(), /主机内存会话/);
-  assert.match(h.text(), /读取和推送均需要令牌/);
-  assert.doesNotMatch(h.text(), /公开仓库可能不需要令牌|主机凭据存储/);
+  assert.match(h.text(), /ssh -T git@github\.com/);
+  assert.match(h.text(), /ssh-agent/);
+  assert.match(h.text(), /不保存任何令牌/);
+  assert.doesNotMatch(h.text(), /个人访问令牌|KNOWLEDGE_TREE_GITHUB_TOKEN/);
 });
-
-test('disconnect clears session PAT only, retaining repository config and accurate env availability', async () => {
-  for (const envToken of [false, true]) {
-    const h = harness([record('a', doc())], {}, { envToken });
-    await h.start(); await h.click('GitHub 配置'); await h.click('清除本次会话 PAT');
-    assert.match(h.text(), /owner\/repo/);
-    assert.doesNotMatch(h.text(), /未连接 GitHub/);
-    assert.match(h.text(), envToken ? /环境变量令牌可用/ : /无可用令牌/);
-    assert.equal(h.records.size, 1);
-    assert.equal(h.button('手动刷新远端目录').props.disabled, false);
-  }
+test('SSH config dialog offers a connection test that keeps local data intact', async () => {
+  const h = harness([record('a', doc())]);
+  await h.start(); await h.click('SSH 配置');
+  await h.click('测试连接');
+  assert.equal(h.calls.some((call) => call.method === 'check'), true);
+  assert.match(h.text(), /SSH 连接正常/);
+  assert.match(h.text(), /git@github\.com:owner\/repo\.git/);
+  assert.equal(h.records.size, 1);
+  assert.equal(h.button('手动刷新远端目录').props.disabled, false);
 });

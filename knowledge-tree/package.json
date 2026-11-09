@@ -1,12 +1,12 @@
 {
   "name": "@local/knowledge-tree",
-  "version": "2.0.1",
+  "version": "2.1.0",
   "scripts": {
     "build": "node build-client.mjs",
-    "test": "node --test ../tests/knowledge*.test.js ../tests/library.test.js ../tests/workspace-ui.test.js tests/github-sync.test.js"
+    "test": "node --test ../tests/knowledge*.test.js ../tests/library.test.js ../tests/workspace-ui.test.js ../tests/git-sync.test.js tests/github-sync.test.js"
   },
   "private": true,
-  "description": "Knowledge Tree for DSH: list, classify and grow multiple local knowledge trees, compare GitHub snapshots, and manually Push/Pull with conflict protection. IndexedDB storage and Markdown / Mermaid / JSON export.",
+  "description": "Knowledge Tree for DSH: list, classify and grow multiple local knowledge trees, compare GitHub snapshots, and manually Push/Pull over SSH with conflict protection. IndexedDB storage and Markdown / Mermaid / JSON export.",
   "type": "module",
   "exports": {
     ".": "./index.js",
@@ -18,6 +18,7 @@
     "index.js",
     "host-service.js",
     "github-sync.js",
+    "git-sync.js",
     "client.js",
     "library.js",
     "workspace-ui.js",

@@ -456,7 +456,17 @@ function createWorkspaceComponents(React) {
     }
     return clone(edited);
   };
-  const remotePrefix = (config) => JSON.stringify([config.owner, config.repo, config.branch, config.directory]) + '/';
+  // Tolerate a Host that still returns the pre-SSH config shape ({owner, repo}): display its
+// equivalent SSH remote instead of `undefined`, and migrate it on the next save.
+  const remoteText = (config) => {
+    if (!config) return '';
+    if (typeof config.remote === 'string') return config.remote;
+    if (typeof config.owner === 'string' && typeof config.repo === 'string') {
+      return `git@github.com:${config.owner}/${String(config.repo).replace(/\.git$/, '')}.git`;
+    }
+    return '';
+  };
+  const remotePrefix = (config) => JSON.stringify([remoteText(config), config.branch, config.directory]) + '/';
   const cachedSnapshot = (row) => row && (row.snapshot || row);
   const errorText = (error) => error && error.message ? error.message : String(error || '未知错误');
   const hashValue = (result) => typeof result === 'string' ? result : result && (result.hash || result.documentHash);
@@ -522,7 +532,7 @@ function createWorkspaceComponents(React) {
     const [notice, setNotice] = useState('');
     const [error, setError] = useState('');
     const [configOpen, setConfigOpen] = useState(false);
-    const [form, setForm] = useState({ owner: '', repo: '', branch: 'main', directory: 'knowledge-trees', token: '' });
+    const [form, setForm] = useState({ remote: 'git@github.com:', branch: 'main', directory: 'knowledge-trees' });
     const [deleteId, setDeleteId] = useState(null);
     const [treeMenu, setTreeMenu] = useState(null);
     const menuRef = useRef(null);
@@ -633,7 +643,7 @@ function createWorkspaceComponents(React) {
     };
     const readRemote = async (treeId) => {
       const config = configRef.current;
-      if (!config) throw new Error('请先配置 GitHub 仓库。');
+      if (!config) throw new Error('请先配置 SSH 仓库地址。');
       const response = await rpc('readTree', { treeId });
       if (!response || response.found === false || response.notFound || !response.document) throw new Error('远端知识树不存在或无法读取；未更改任何本地内容。');
       // Hash/cache the exact remote document. Normalization is an editor projection only.
@@ -659,7 +669,7 @@ function createWorkspaceComponents(React) {
       }
     });
     const refreshRemote = () => run(async () => {
-      if (!configRef.current) throw new Error('请先配置 GitHub 仓库。');
+      if (!configRef.current) throw new Error('请先配置 SSH 仓库地址。');
       const result = await rpc('listTrees', {});
       const items = Array.isArray(result) ? result : result && (result.trees || result.items) || [];
       setRemoteItems(items.map((item) => typeof item === 'string' ? { treeId: item, title: item } : { ...item, treeId: item.treeId || item.id }));
@@ -686,7 +696,7 @@ function createWorkspaceComponents(React) {
           if (!alive.current) return;
           setStatus(result);
           configRef.current = result.configured ? result.config : null;
-          if (result.config) setForm({ ...result.config, token: '' });
+          if (result.config) setForm({ remote: remoteText(result.config), branch: result.config.branch, directory: result.config.directory });
           if (configRef.current) {
             const cached = await library.listRemote(remotePrefix(configRef.current));
             if (alive.current) setRemoteItems((cached || []).map((row) => {
@@ -694,7 +704,7 @@ function createWorkspaceComponents(React) {
               return { ...item, treeId: item.treeId || (row.remoteKey || row.key || '').slice(remotePrefix(configRef.current).length), cached: true };
             }));
           }
-        } catch (reason) { showError(new Error(`GitHub 状态不可用（本地仍可编辑）：${errorText(reason)}`)); }
+        } catch (reason) { showError(new Error(`SSH 同步状态不可用（本地仍可编辑）：${errorText(reason)}`)); }
       })();
       return () => { alive.current = false; };
     }, []);
@@ -811,31 +821,25 @@ function createWorkspaceComponents(React) {
         if (records[0]) await activate(records[0], true);
         else await remember(null);
       }
-      setNotice('本地知识树已删除；GitHub 远端内容未删除。');
+      setNotice('本地知识树已删除；SSH 远端内容未删除。');
     });
     const configure = (event) => {
       event.preventDefault();
       run(async () => {
-        const input = { owner: form.owner.trim(), repo: form.repo.trim(), branch: form.branch.trim(), directory: form.directory.trim() };
-        if (!input.owner || !input.repo || !input.branch || !input.directory) throw new Error('请填写仓库所有者、仓库名称、分支和目录。');
-        if (form.token.trim()) input.token = form.token.trim();
+        const input = { remote: form.remote.trim(), branch: form.branch.trim(), directory: form.directory.trim() };
+        if (!input.remote || !input.branch || !input.directory) throw new Error('请填写 SSH 远端地址、分支和目录。');
         const result = await rpc('configure', input);
         const next = result && typeof result.configured === 'boolean' ? result : await rpc('status', {});
         configRef.current = next.configured ? next.config : null;
         setStatus(next);
-        setForm({ ...(next.config || input), token: '' });
+        setForm(next.config ? { remote: remoteText(next.config), branch: next.config.branch, directory: next.config.directory } : input);
         setRemote(null); setRemoteItems([]); setConflict(null); setConfigOpen(false);
-        setNotice('仓库配置已保存。没有自动上传；请手动刷新远端目录。');
+        setNotice('SSH 仓库配置已保存。没有自动上传；请手动刷新远端目录。');
       });
     };
-    const disconnect = () => run(async () => {
-      await rpc('disconnect', {});
-      const next = await rpc('status', {});
-      configRef.current = next.configured ? next.config : null;
-      setStatus(next);
-      setForm((value) => ({ ...value, token: '' }));
-      setRemote(null); setRemoteItems([]); setConflict(null); setConfigOpen(false);
-      setNotice('已清除主机本次会话的 PAT；仓库配置和本地知识树仍保留。若主机设置了环境变量令牌，该凭据仍然可用。');
+    const checkConnection = () => run(async () => {
+      const result = await rpc('check', {});
+      setNotice(`SSH 连接正常：${result.remote}（${result.branch}）@ ${String(result.commitSha).slice(0, 8)}`);
     });
     const push = () => run(async () => {
       setPushing(true);
@@ -867,7 +871,7 @@ function createWorkspaceComponents(React) {
           context.record = result || await library.getLocal(context.id);
         });
       } catch (reason) {
-        throw new Error(`GitHub 推送已成功，但本地同步基线记录失败：${errorText(reason)}。远端提交已存在，请勿误认为推送失败而重复覆盖。`);
+        throw new Error(`远端推送已成功，但本地同步基线记录失败：${errorText(reason)}。远端提交已存在，请勿误认为推送失败而重复覆盖。`);
       }
       await refreshLocals(); update();
       setPushOpen(false);
@@ -968,8 +972,8 @@ function createWorkspaceComponents(React) {
     return h('section', { className: 'ktw', 'aria-label': '知识树工作区' },
       h('style', null, css + menuCss),
       h('header', null, h('strong', null, '知识树工作区'), h('span', { className: 'kw-muted' }, '本地优先 · 只有点击推送才上传'),
-        h('button', { type: 'button', disabled: busy, onClick: () => setConfigOpen(true) }, 'GitHub 配置'),
-        h('span', { className: 'kw-muted' }, status && status.configured ? `${status.config.owner}/${status.config.repo} · ${status.credentialAvailable ? status.credentialSource === 'environment' || status.credentialSource === 'env' ? '环境变量令牌可用' : '凭据可用' : '无可用令牌（读取和推送均需令牌）'}` : '未连接 GitHub')),
+        h('button', { type: 'button', disabled: busy, onClick: () => setConfigOpen(true) }, 'SSH 配置'),
+        h('span', { className: 'kw-muted' }, status && status.configured ? `${remoteText(status.config)} · ${status.config.branch}${status.gitAvailable === false ? ' · 未找到 git' : ''}` : '未配置 SSH 远端')),
       error && h('div', { role: 'alert', className: 'kw-notice kw-error' }, error),
       notice && h('div', { role: 'status', className: 'kw-notice' }, notice),
       h('div', { className: 'kw-body', 'aria-busy': busy || !ready },
@@ -985,7 +989,7 @@ function createWorkspaceComponents(React) {
               onKeyDown: (event) => { if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) openTreeMenu(event, record, true); else if (event.key === 'F2') { event.preventDefault(); if (!busyRef.current) openNameDialog(record); } },
             }, title(record)),
             deleteId === record.id && h('div', { className: 'kw-inline' }, h('p', null, '仅删除本地树，确定吗？'), h('button', { type: 'button', disabled: busy, onClick: () => deleteTree(record.id) }, '确认删除'), ' ', h('button', { type: 'button', disabled: busy, onClick: () => setDeleteId(null) }, '取消'))))),
-          h('h2', null, 'GitHub 远端'),
+          h('h2', null, 'SSH 远端'),
           h('button', { type: 'button', disabled: busy || !status?.configured, onClick: refreshRemote }, '手动刷新远端目录'),
           h('p', { className: 'kw-muted' }, '点击只读浏览，不会导入或覆盖本地。'),
           h('ul', null, remoteItems.filter((item) => item.treeId).map((item) => h('li', { key: item.treeId }, h('button', { type: 'button', className: 'kw-tree', disabled: busy, 'aria-current': remote?.treeId === item.treeId, onClick: () => openRemote(item.treeId) }, `${item.title || item.document?.title || item.treeId}${item.cached ? '（缓存）' : ''}`))))),
@@ -1021,16 +1025,16 @@ function createWorkspaceComponents(React) {
         nameError && h('p', { role: 'alert', className: 'kw-error' }, nameError),
         h('div', { className: 'kw-actions' }, h('button', { type: 'submit', disabled: busy }, nameDialog.id === null ? '创建' : '保存名称'), h('button', { type: 'button', disabled: busy, onClick: () => setNameDialog(null) }, '取消')))),
       configOpen && h('div', { className: 'kw-dialog' }, h('form', { role: 'dialog', 'aria-modal': true, 'aria-labelledby': 'kw-config-title', onSubmit: configure },
-        h('h2', { id: 'kw-config-title' }, 'GitHub 仓库配置'),
-        h('p', null, '只连接你有权使用的仓库。配置后不会自动上传。公开仓库中的卡片正文和图片对所有人可见，请勿上传隐私内容。'),
-        [['owner', '仓库所有者'], ['repo', '仓库名称'], ['branch', '分支'], ['directory', '目录']].map(([key, label]) => h('label', { key }, label, h('input', { value: form[key], required: true, disabled: busy, onChange: (event) => setForm((value) => ({ ...value, [key]: event.target.value })) }))),
-        h('details', null, h('summary', null, '个人访问令牌（PAT）：用途与权限说明'), h('p', null, '当前连接器读取和推送均需要令牌；推送需要仓库 Contents 读写权限。建议使用仅授权该仓库的细粒度令牌。PAT 只保留在主机内存会话，插件重载或应用重启后需要重新填写；也可由主机环境变量 KNOWLEDGE_TREE_GITHUB_TOKEN 提供。不会写入本地知识树、浏览器 localStorage 或磁盘，也不会由配置接口回传。留空会保留现有凭据。'), h('label', null, 'PAT（可选）', h('input', { type: 'password', value: form.token, autoComplete: 'new-password', disabled: busy, onChange: (event) => setForm((value) => ({ ...value, token: event.target.value })) }))),
-        h('div', { className: 'kw-actions' }, h('button', { type: 'submit', disabled: busy }, '保存配置'), h('button', { type: 'button', disabled: busy, onClick: () => { setConfigOpen(false); setForm((value) => ({ ...value, token: '' })); } }, '取消'), h('button', { type: 'button', disabled: busy || !status?.configured, onClick: disconnect }, '清除本次会话 PAT')))),
+        h('h2', { id: 'kw-config-title' }, 'SSH 仓库配置'),
+        h('p', null, '通过本机 git 以 SSH 推送（不保存任何令牌）。只连接你有权使用的仓库；配置后不会自动上传。公开仓库中的卡片正文和图片对所有人可见，请勿上传隐私内容。'),
+        [['remote', 'SSH 远端地址（git@github.com:owner/repo.git）'], ['branch', '分支'], ['directory', '目录']].map(([key, label]) => h('label', { key }, label, h('input', { value: form[key], required: true, disabled: busy, onChange: (event) => setForm((value) => ({ ...value, [key]: event.target.value })) }))),
+        h('details', null, h('summary', null, 'SSH 前置条件'), h('p', null, '需要在 Host 所在机器上：1) 已安装 git；2) 已生成并添加 SSH 公钥到 GitHub；3) ssh -T git@github.com 能正常通过（使用 ssh-agent 或 ~/.ssh/config）。插件不读取、不保存私钥，凭证完全交给系统 SSH。首次连接 GitHub 时请先在终端完成 known_hosts 指纹确认。')),
+        h('div', { className: 'kw-actions' }, h('button', { type: 'submit', disabled: busy }, '保存配置'), h('button', { type: 'button', disabled: busy || !status?.configured, onClick: checkConnection }, '测试连接'), h('button', { type: 'button', disabled: busy, onClick: () => setConfigOpen(false) }, '取消')))),
       pushOpen && current && h('div', { className: 'kw-dialog' }, h('form', { role: 'dialog', 'aria-modal': true, 'aria-labelledby': 'kw-push-title', onSubmit: (event) => { event.preventDefault(); push(); } },
         h('h2', { id: 'kw-push-title' }, '确认推送当前本地树'), h('p', null, `仅推送「${title({ document: current.draft.document })}」，不会上传其他本地树。`),
         h('p', null, counts(current.draft.document)), h('p', { className: 'kw-muted' }, '预览包含正文、关系和图片。点击推送时捕获已保存版本；推送期间仍可编辑，新编辑不会被覆盖。公开仓库内容对所有人可见。'),
         h('label', null, '提交说明', h('textarea', { value: message, required: true, disabled: busy, onChange: (event) => setMessage(event.target.value) })),
-        h('div', { className: 'kw-actions' }, h('button', { type: 'submit', disabled: busy || !!current.pending || !!current.error }, busy ? '正在推送…' : '确认推送到 GitHub'), h('button', { type: 'button', disabled: busy, onClick: () => setPushOpen(false) }, '取消')))));
+        h('div', { className: 'kw-actions' }, h('button', { type: 'submit', disabled: busy || !!current.pending || !!current.error }, busy ? '正在推送…' : '确认通过 SSH 推送'), h('button', { type: 'button', disabled: busy, onClick: () => setPushOpen(false) }, '取消')))));
   }
   return { Workspace };
 }
@@ -1235,7 +1239,11 @@ function createWorkspaceComponents(React) {
         'tr.empty': 'The tree is empty.',
         'tr.collapsedCount': '{count} hidden',
         'tr.graphHint':
-          'Preview is read-only. Edit in “Outline editor”, or go back to grouping to change parents.',
+          'Read-only preview: click a node to read its content, use the small arrow to fold children. Edit in “Outline editor”; change parents in grouping.',
+        'graph.close': 'Close',
+        'graph.kids': '{count} child item(s)',
+        'graph.refs': '{count} more reference(s)',
+        'graph.readonly': 'Read-only preview — edit in “Outline editor”.',
         'tr.htmlCards': 'cards',
         'tr.htmlLinks': 'links',
         'tr.htmlFooter': 'Exported from the Knowledge Tree plugin',
@@ -1434,7 +1442,12 @@ function createWorkspaceComponents(React) {
         'tr.edit': '改标题',
         'tr.empty': '树还是空的。',
         'tr.collapsedCount': '藏了 {count} 个',
-        'tr.graphHint': '预览只读。编辑请用「大纲编辑」，改归属请回到归类。',
+        'tr.graphHint':
+          '预览只读：点节点看内容，点小箭头折叠或展开子项。编辑请用「大纲编辑」，改归属请回到归类。',
+        'graph.close': '关闭',
+        'graph.kids': '{count} 个子项',
+        'graph.refs': '另关联 {count} 处',
+        'graph.readonly': '只读预览；编辑请切到「大纲编辑」。',
         'tr.htmlCards': '张卡片',
         'tr.htmlLinks': '条关系',
         'tr.htmlFooter': '由知识树插件导出',
@@ -1639,14 +1652,28 @@ function createWorkspaceComponents(React) {
       '.kt-content-placeholder{color:var(--dsw-alias-label-secondary);opacity:.8}',
       '.kt-inline-actions{display:flex;gap:6px}',
       '.kt-add-row-inline{display:flex;gap:6px;margin:2px 8px 8px 28px}',
-      '.kt-graph-scroll{width:100%;overflow:auto}',
-      '.kt-graph{position:relative}',
+      '.kt-graph-wrap{display:flex;align-items:flex-start;gap:14px}',
+      '.kt-graph-main{flex:1;min-width:0}',
+      '.kt-graph-scroll{width:100%;overflow:auto;padding:4px 0}',
+      '.kt-graph{position:relative;margin:0 auto}',
       '.kt-graph-edges{position:absolute;left:0;top:0;pointer-events:none;overflow:visible}',
-      '.kt-graph-node{position:absolute;box-sizing:border-box;height:30px;display:flex;align-items:center;gap:4px;padding:0 10px;border:.5px solid var(--dsw-alias-border-l1);border-radius:8px;background:var(--dsw-alias-bg-layer-2);font-size:12.5px;line-height:18px;cursor:pointer;overflow:hidden}',
-      '.kt-graph-node:hover{border-color:var(--dsw-alias-brand-primary)}',
-      '.kt-graph-root{background:color-mix(in srgb,var(--dsw-alias-brand-primary) 10%,var(--dsw-alias-bg-layer-2));border-color:color-mix(in srgb,var(--dsw-alias-brand-primary) 35%,var(--dsw-alias-border-l1))}',
+      '.kt-graph-node{position:absolute;box-sizing:border-box;height:34px;display:flex;align-items:center;gap:6px;padding:0 10px;border:.5px solid var(--dsw-alias-border-l1);border-radius:10px;background:var(--dsw-alias-bg-layer-1);box-shadow:0 1px 2px color-mix(in srgb,#000 6%,transparent);font-size:12.5px;line-height:18px;cursor:pointer;overflow:hidden;transition:border-color .12s,box-shadow .12s,background .12s}',
+      '.kt-graph-node:hover{border-color:color-mix(in srgb,var(--dsw-alias-brand-primary) 45%,var(--dsw-alias-border-l1));box-shadow:0 2px 6px color-mix(in srgb,#000 8%,transparent)}',
+      '.kt-graph-root{background:color-mix(in srgb,var(--dsw-alias-brand-primary) 7%,var(--dsw-alias-bg-layer-1));border-color:color-mix(in srgb,var(--dsw-alias-brand-primary) 28%,var(--dsw-alias-border-l1));font-weight:600}',
+      '.kt-graph-selected{border-color:var(--dsw-alias-brand-primary);box-shadow:0 0 0 2px color-mix(in srgb,var(--dsw-alias-brand-primary) 18%,transparent);background:color-mix(in srgb,var(--dsw-alias-brand-primary) 9%,var(--dsw-alias-bg-layer-1))}',
+      '.kt-graph-caret{flex:none;width:16px;height:16px;padding:0;border:0;border-radius:4px;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:10px;line-height:16px;cursor:pointer}',
+      '.kt-graph-caret:hover{background:color-mix(in srgb,var(--dsw-alias-label-primary) 10%,transparent);color:var(--dsw-alias-label-primary)}',
+      '.kt-graph-dot{flex:none;width:16px;text-align:center;color:var(--dsw-alias-label-secondary)}',
       '.kt-graph-text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
-      '.kt-graph-more{flex:none;font-size:10.5px;color:var(--dsw-alias-brand-primary)}',
+      '.kt-graph-count{flex:none;min-width:18px;text-align:center;font-size:10.5px;line-height:16px;color:var(--dsw-alias-label-secondary);background:color-mix(in srgb,var(--dsw-alias-label-primary) 8%,transparent);border-radius:999px;padding:0 5px}',
+      '.kt-graph-tip{margin:10px 0 0;font-size:11.5px;line-height:17px;color:var(--dsw-alias-label-secondary)}',
+      '.kt-graph-with-detail .kt-graph-detail{width:296px;flex:none;position:sticky;top:4px;max-height:72vh;overflow:auto;padding:12px 14px;border:.5px solid var(--dsw-alias-border-l1);border-radius:12px;background:var(--dsw-alias-bg-layer-1);box-shadow:0 2px 10px color-mix(in srgb,#000 6%,transparent)}',
+      '.kt-graph-detail-head{display:flex;align-items:flex-start;gap:8px}',
+      '.kt-graph-detail-title{flex:1;min-width:0;font-size:13px;line-height:20px}',
+      '.kt-graph-detail-meta{margin:2px 0 0;font-size:11.5px;line-height:17px;color:var(--dsw-alias-label-secondary)}',
+      '.kt-graph-detail-img{display:block;max-width:100%;max-height:160px;object-fit:contain;margin:8px 0 0;border:.5px solid var(--dsw-alias-border-l1);border-radius:8px;background:var(--dsw-alias-bg-layer-2);cursor:zoom-in}',
+      '.kt-graph-detail-body{margin:8px 0 0;font-size:12.5px;line-height:19px;white-space:pre-wrap;color:var(--dsw-alias-label-primary)}',
+      '.kt-graph-detail-hint{margin:8px 0 0;font-size:11px;line-height:16px;color:var(--dsw-alias-label-secondary)}',
       '.kt-menu-wrap{position:relative}',
       '.kt-menu{position:absolute;right:0;top:calc(100% + 6px);z-index:20;min-width:172px;padding:4px;border:.5px solid var(--dsw-alias-border-l1);border-radius:10px;background:var(--dsw-alias-bg-overlay,var(--dsw-alias-bg-layer-1));box-shadow:0 8px 24px color-mix(in srgb,#000 18%,transparent)}',
       '.kt-menu-item{display:block;width:100%;padding:7px 10px;border:0;border-radius:7px;background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:12.5px;text-align:left;cursor:pointer}',
@@ -1694,7 +1721,9 @@ function createWorkspaceComponents(React) {
       '.kt-bcard-actions{flex:none;display:flex;flex-wrap:wrap;gap:3px 10px}',
       '.kt-bcard-body{gap:6px}',
       '.kt-meta-row{gap:6px 14px}',
+      '.kt-graph-node:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}',
       '.kt-icon-btn:focus-visible,.kt-btn:focus-visible,.kt-text-btn:focus-visible,.kt-mini-btn:focus-visible,.kt-input:focus-visible,.kt-textarea:focus-visible,.kt-card-head:focus-visible,.kt-bcard:focus-visible,.kt-trow:focus-visible,.kt-trow-title:focus-visible,.kt-seg-btn:focus-visible,.kt-menu-item:focus-visible,.kt-tree-title:focus-visible,.kt-attach-item:focus-visible,.kt-dialog .kt-btn:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}',
+      '@media (max-width:900px){.kt-graph-wrap{flex-direction:column}.kt-graph-with-detail .kt-graph-detail{width:100%;position:static;max-height:none}}',
       '@media (max-width:820px){.kt-board-hint{display:none}}',
       '@media (max-width:760px){.kt-toolbar-right{margin-left:0;flex-wrap:wrap}.kt-head-actions{flex-wrap:wrap}.kt-summary{font-size:11.5px}}',
       '@media (max-width:560px){.kt-head-actions{gap:6px}.kt-stage-actions{width:100%;margin-left:0}}',
@@ -5013,11 +5042,48 @@ function createWorkspaceComponents(React) {
     }
 
     function TreeGraph(props) {
-      const { index, collapsed, expanded, t, onToggle } = props;
-      const COL = 190;
-      const ROW = 42;
-      const NODE_H = 30;
-      const NODE_W = COL - 34;
+      const { index, collapsed, t, onToggle } = props;
+      const [selected, setSelected] = React.useState(null);
+      const [zoom, setZoom] = React.useState(false);
+
+      React.useEffect(() => {
+        if (selected === null) return undefined;
+        function onKey(event) {
+          if (event.key === 'Escape') {
+            event.preventDefault();
+            setSelected(null);
+          }
+        }
+        document.addEventListener('keydown', onKey);
+        return () => document.removeEventListener('keydown', onKey);
+      }, [selected]);
+      const GAP_X = 54;
+      const ROW = 46;
+      const NODE_H = 34;
+      const PAD_X = 22;
+      const PAD_Y = 16;
+
+      function textWidth(text) {
+        try {
+          if (typeof document !== 'undefined' && document.createElement) {
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext && canvas.getContext('2d');
+            if (context !== null && context !== undefined) {
+              context.font =
+                '12.5px system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif';
+              const measured = context.measureText(text).width;
+              if (measured > 0) return measured;
+            }
+          }
+        } catch (error) {
+          /* fall back to the character heuristic */
+        }
+        return Array.from(text).reduce(
+          (total, ch) => total + (/[\u2e80-\u9fff\uff00-\uffef]/.test(ch) ? 13 : 7.4),
+          0,
+        );
+      }
+
       const pos = new Map();
       let cursor = 0;
       let maxDepth = 0;
@@ -5035,25 +5101,45 @@ function createWorkspaceComponents(React) {
           y = (ys[0] + ys[ys.length - 1]) / 2;
         }
         maxDepth = Math.max(maxDepth, depth);
-        pos.set(card.id, { x: depth * COL, y, depth });
+        pos.set(card.id, { y, depth });
         return y;
       }
 
       index.roots.forEach((root) => walk(root, 0, new Set()));
       if (pos.size === 0) return h('p', { className: 'kt-empty' }, t('tr.empty'));
 
-      const width = (maxDepth + 1) * COL + 20;
-      const height = Math.max(cursor, 1) * ROW + 10;
+      const columns = [];
+      pos.forEach((point, id) => {
+        const card = index.byId.get(id);
+        if (card === undefined) return;
+        const kids = index.primaryChildrenOf.get(id) || [];
+        const chrome = kids.length > 0 ? 82 : 46;
+        const width = Math.max(150, Math.min(300, Math.round(textWidth(card.title)) + chrome));
+        columns[point.depth] = Math.max(columns[point.depth] || 0, width);
+      });
+      for (let depth = 0; depth <= maxDepth; depth += 1) {
+        if (columns[depth] === undefined) columns[depth] = 150;
+      }
+
+      const xOf = (depth) => {
+        let x = 0;
+        for (let i = 0; i < depth; i += 1) x += columns[i] + GAP_X;
+        return x;
+      };
+
+      const width = Math.max(320, PAD_X * 2 + xOf(maxDepth) + columns[maxDepth]);
+      const height = Math.max(cursor, 1) * ROW + PAD_Y * 2;
+
       const edges = [];
       pos.forEach((point, id) => {
         if (collapsed.has(id)) return;
         (index.primaryChildrenOf.get(id) || []).forEach((kid) => {
           const child = pos.get(kid.id);
           if (child === undefined) return;
-          const x1 = point.x + NODE_W;
-          const y1 = point.y + NODE_H / 2;
-          const x2 = child.x;
-          const y2 = child.y + NODE_H / 2;
+          const x1 = PAD_X + xOf(point.depth) + columns[point.depth];
+          const y1 = PAD_Y + point.y + NODE_H / 2;
+          const x2 = PAD_X + xOf(child.depth);
+          const y2 = PAD_Y + child.y + NODE_H / 2;
           const mid = (x1 + x2) / 2;
           edges.push(
             h('path', {
@@ -5078,31 +5164,146 @@ function createWorkspaceComponents(React) {
             'div',
             {
               key: 'n-' + id,
-              className: 'kt-graph-node' + (point.depth === 0 ? ' kt-graph-root' : ''),
-              style: { left: point.x, top: point.y, width: NODE_W },
+              className:
+                'kt-graph-node' +
+                (point.depth === 0 ? ' kt-graph-root' : '') +
+                (selected === id ? ' kt-graph-selected' : ''),
+              style: { left: PAD_X + xOf(point.depth), top: PAD_Y + point.y, width: columns[point.depth] },
               title: card.content === '' ? card.title : card.title + '\n' + card.content,
               role: 'treeitem',
+              tabIndex: 0,
               'aria-level': point.depth + 1,
               'aria-expanded': kids.length > 0 ? !hidden : undefined,
-              onClick: () => {
-                if (kids.length > 0) onToggle(id);
+              'aria-selected': selected === id ? 'true' : undefined,
+              onClick: () => setSelected(selected === id ? null : id),
+              onKeyDown: (event) => {
+                if (event.key !== 'Enter' && event.key !== ' ') return;
+                if (event.target !== event.currentTarget) return;
+                event.preventDefault();
+                setSelected(selected === id ? null : id);
               },
             },
+            kids.length > 0
+              ? h(
+                  'button',
+                  {
+                    type: 'button',
+                    className: 'kt-graph-caret',
+                    'aria-label': hidden ? t('tr.expandChildren') : t('tr.collapseChildren'),
+                    title: hidden ? t('tr.expandChildren') : t('tr.collapseChildren'),
+                    onClick: (event) => {
+                      event.stopPropagation();
+                      onToggle(id);
+                    },
+                  },
+                  hidden ? '▸' : '▾',
+                )
+              : h('span', { className: 'kt-graph-dot', 'aria-hidden': 'true' }, '·'),
             h('span', { className: 'kt-graph-text' }, card.title),
-            hidden && kids.length > 0 ? h('span', { className: 'kt-graph-more' }, '+' + kids.length) : null,
+            kids.length > 0
+              ? h('span', { className: 'kt-graph-count' }, hidden ? '+' + kids.length : kids.length)
+              : null,
           ),
         );
       });
 
+      const activeId = selected !== null && pos.has(selected) ? selected : null;
+      const selectedCard = activeId === null ? null : index.byId.get(activeId) || null;
+      const selectedParents =
+        selectedCard === null ? [] : index.parentsOf.get(selectedCard.id) || [];
+      const selectedPrimary = selectedParents.find((link) => link.primary);
+      const selectedParentCard =
+        selectedPrimary === undefined ? null : index.byId.get(selectedPrimary.parentId) || null;
+      const selectedRefs = selectedParents.filter((link) => !link.primary).length;
+      const selectedKids =
+        selectedCard === null ? [] : index.primaryChildrenOf.get(selectedCard.id) || [];
+
       return h(
         'div',
-        { className: 'kt-graph-scroll' },
+        { className: 'kt-graph-wrap' + (selectedCard === null ? '' : ' kt-graph-with-detail') },
         h(
           'div',
-          { className: 'kt-graph', style: { width, height } },
-          h('svg', { className: 'kt-graph-edges', width, height, 'aria-hidden': true }, edges),
-          nodes,
+          { className: 'kt-graph-main' },
+          h(
+            'div',
+            {
+              className: 'kt-graph-scroll',
+              onClick: (event) => {
+                const target = event.target;
+                if (
+                  target !== null &&
+                  target !== undefined &&
+                  typeof target.closest === 'function' &&
+                  target.closest('.kt-graph-node') !== null
+                ) {
+                  return;
+                }
+                setSelected(null);
+              },
+            },
+            h(
+              'div',
+              { className: 'kt-graph', style: { width, height } },
+              h('svg', { className: 'kt-graph-edges', width, height, 'aria-hidden': true }, edges),
+              nodes,
+            ),
+          ),
         ),
+        selectedCard === null
+          ? null
+          : h(
+              'div',
+              { className: 'kt-graph-detail' },
+              h(
+                'div',
+                { className: 'kt-graph-detail-head' },
+                h('strong', { className: 'kt-graph-detail-title' }, selectedCard.title),
+                h(
+                  'button',
+                  {
+                    type: 'button',
+                    className: 'kt-mini-btn',
+                    title: t('graph.close'),
+                    'aria-label': t('graph.close'),
+                    onClick: () => setSelected(null),
+                  },
+                  h(Icon, { name: 'close', size: 12 }),
+                ),
+              ),
+              h(
+                'p',
+                { className: 'kt-graph-detail-meta' },
+                selectedParentCard === null
+                  ? t('cl.affilTop')
+                  : t('cl.affilParent', { name: selectedParentCard.title }),
+                selectedKids.length > 0 ? ' · ' + t('graph.kids', { count: selectedKids.length }) : '',
+                selectedRefs > 0 ? ' · ' + t('graph.refs', { count: selectedRefs }) : '',
+              ),
+              selectedCard.image !== null && selectedCard.image !== undefined
+                ? h('img', {
+                    className: 'kt-graph-detail-img',
+                    src: selectedCard.image.data,
+                    alt: selectedCard.title,
+                    onClick: () => setZoom(true),
+                  })
+                : null,
+              h(
+                'div',
+                { className: 'kt-graph-detail-body' },
+                selectedCard.content === ''
+                  ? h('span', { className: 'kt-content-placeholder' }, t('card.noContent'))
+                  : selectedCard.content,
+              ),
+              h('p', { className: 'kt-graph-detail-hint' }, t('graph.readonly')),
+            ),
+        zoom && selectedCard !== null && selectedCard.image
+          ? h(Lightbox, {
+              image: selectedCard.image,
+              title: selectedCard.title,
+              t,
+              onClose: () => setZoom(false),
+            })
+          : null,
       );
     }
 

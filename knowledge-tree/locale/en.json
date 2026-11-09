@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Knowledge Tree",
-    "description": "List, classify, and grow knowledge trees. Multiple local documents, read-only GitHub comparison, manual Push/Pull, and conflict protection. Local by default; uploads require an explicit Push."
+    "description": "List, classify, and grow knowledge trees. Multiple local documents, read-only GitHub comparison over SSH, manual Push/Pull, and conflict protection. Local by default; uploads require an explicit Push."
   }
 }

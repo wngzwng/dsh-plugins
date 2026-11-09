@@ -219,6 +219,17 @@ function markdown(document) {
   return Buffer.from(`${lines.join('\n')}\n`);
 }
 
+/** Format helpers shared by other transports (git over SSH reuses the same on-disk tree format). */
+export const treeFormat = {
+  MAX_IMAGE, MAX_FILE, MAX_DOCUMENT, MAX_ASSETS, MAX_RESPONSE, MAX_SNAPSHOT_BYTES,
+  MAX_TREE_ENTRIES, MAX_TREES, MIME_EXT, TREE_ID, ASSET,
+  validateDocument, stable, markdown, imageBytes, digest, gitBlobHash, checkTreeId,
+};
+
+/**
+ * Legacy HTTPS/PAT adapter. The Host now pushes over SSH via `git-sync.js`; this adapter is
+ * kept for the shared on-disk format and its tests, and can still be used directly.
+ */
 export function createGithubSync({ fetchImpl = globalThis.fetch, getToken, getConfig } = {}) {
   if (typeof fetchImpl !== 'function' || typeof getToken !== 'function' || typeof getConfig !== 'function') fail('INVALID_CONFIG');
 

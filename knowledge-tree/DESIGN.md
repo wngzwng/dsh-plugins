@@ -2,7 +2,7 @@
 
 - 状态：**插件 v2.0 GitHub 同步第一版**（2026-11-07）；原编辑器数据格式仍为 v3。
 - 本文 1–11 节保留旧编辑器设计记录；存储/Host 架构已由第 12 节及 README 的 v2.0 说明取代。
-- 现为 Host + Client bundle、IndexedDB 多文档、手动 GitHub API 同步、主题 token。
+- 现为 Host + Client bundle、IndexedDB 多文档、手动 SSH（系统 git）同步、主题 token。
 
 ## 1. 定位
 
@@ -112,6 +112,9 @@
 - 只有**真的跑过检查且无环**才显示「结构检查通过」；「可以导出」单独出现在导出说明里，
   不暗示内容或分类已经被确认。
 - 视图：**大纲编辑**（可编辑）/ **树形预览**（只读）。预览页明确写出「预览只读」并指回编辑位置。
+- 树形预览（v2.1）：分层节点的宽度按该列最长标题自适应（150–300px，超出才省略），画布居中；
+  点节点在右侧停靠面板看标题 / 归属 / 内容 / 图片（只读，点图片可放大），点节点左侧小箭头折叠或展开子项，
+  再点节点、点空白或按 Esc 关闭；不再用固定 156px 节点和点击即折叠的方式。
 - 大纲编辑里可：改标题、展开看内容、编辑内容、折叠子项、加子项、删除（子项上提）、
   同级上移 / 下移、拖动改父（与归类白板同一语义）。
 - **树名是文档名，不是根节点**：独立字段 + 标签 + 说明「只改文档名称，不影响结构；导出文件名也用它」，
@@ -258,20 +261,26 @@ knowledge-tree/
 - 触屏不触发 HTML5 drag；用卡片展开区的「改归属… / 添加关联… / 设为顶层主题」等价操作。
 - 白板不做自由摆放，也不做力导向（会漂移）。
 - 同级排序用 ↑ / ↓ 按钮，不做拖拽插入位。
-- 树形预览只读；改归属统一回到归类白板。
+- 树形预览只读；改归属统一回到归类白板。预览里点节点只查看内容，不编辑。
+- 预览节点宽度有上限（300px），超长标题仍省略，但 hover 有完整 title/内容提示。
 - 阶段切换会重置白板滚动位置（组件卸载），展开 / 折叠状态保留。
 - 引导提示是本地可编辑列表（内置 12 条），不接模型追问。
 - 配图受 localStorage 约 5MB 限制（压缩后 40–300KB/张，约 15–25 张）；写满时该图不保存并提示，
   文字与结构不受影响。不做标注 / 裁剪 / 多图相册。
 - 英文界面是尽力而为的翻译；缺漏或措辞过时不影响中文主流程。
 
-## 12. GitHub 同步第一版（2026-11-07）
+## 12. SSH 同步（2026-11-09）
 
 - `library.js` 是可独立测试、可嵌入 Client 的 IndexedDB 资料库；locals/remotes/settings/snapshots/meta 独立 stores。旧数据迁移一次性事务，保留所有原键；失败不空树替换。所有本地编辑按 revision CAS 提交。
 - `workspace-ui.js` 在原三阶段编辑器外提供本地多树、远端只读并排查看、手动 Push/Pull。远端缓存与本地文档分离；稳定 treeId 不随文档名变化。
-- `github-sync.js` 为 Node GitHub REST adapter。commit pinned reads；tree.json 权威、tree.md 生成、图片 content-addressed；单 Git tree/commit 与 non-force ref 更新。双方相对 baseHash 改动则拒绝，没有自动 merge/force。
-- `host-service.js` 使用 DSH `connection.fetch.register` 的 `/api/knowledge-tree/*` 精确 POST 路由，继承 owner 认证与 Host/Origin fence；不另起服务器。Token 仅 Host 会话内存或命名环境变量，配置文件不含秘密，错误不泄露远端响应或 Token。
-- `build-client.mjs` 将无依赖 library/UI 的测试源码嵌入现有 Client module loader，不依赖 loader 对相对 import 的支持。修改 library/UI 后必须重新 build。
-- 本地依旧以自包含 data URL 保存配图（未实现 Blob 拆存）；IndexedDB 容量由浏览器管理。默认无远端请求；主动刷新/查看/Pull/Push 才访问 GitHub。
-- 初版只支持已存在的一个仓库与分支、手动同步；不自动创建分支、PR、仓库或定时同步，不实现卡片级冲突裁决与完整三方合并。快照恢复创建无关联新本地副本，原文档不回滚。
-- 测试：GitHub mock API 覆盖竞态、原子提交、损坏/超限拒绝与图片往返；真实 Chrome IndexedDB 覆盖迁移/回滚/CAS/缓存；UI hook harness 覆盖 Push 中编辑、Pull 分叉阻止、离线缓存、恢复与多窗口。
+- **传输改为 SSH**：`git-sync.js` 在 Host 侧调用系统 `git`，使用用户 ssh-agent / `~/.ssh/config`；不保存 PAT、不读取私钥。缓存仓库在 `DSH_HOME/storages/knowledge-tree/git/<hash>`（普通仓库，仅含 remote-tracking ref）。
+- 读：每次操作 `git fetch` 固定分支 → `rev-parse` 得到 commit → `ls-tree -r -l` 建快照（大小/条数上限）→ `cat-file blob` 读文件，读取固定在一个 commit 上。
+- 写：从 base commit 建临时 worktree → 写 `tree.json` / `tree.md` / content-addressed `assets/*` → 清理旧受管资源 → `git add` + `commit`（固定身份，不签名）→ 非 force `git push` 到分支。分支前进或他人提交导致非快进时 Git 拒绝，映射为 REF_CONFLICT；绝不 force push。
+- 冲突保护沿用内容哈希与共同基线：远端文档哈希等于本地则不推送；与 baseHash 不一致则 CONFLICT，不自动合并。远端格式与 HTTPS 版完全一致，旧仓库无需迁移文件。
+- 配置仅 `{remote, branch, directory}`，`remote` 限定 `git@github.com:owner/repo.git` 或 `ssh://git@github.com/...`；旧 HTTPS 配置（owner/repo）在加载时自动迁移为 SSH 地址，PAT 不再保留。
+- `host-service.js` 使用 DSH `connection.fetch.register` 的 `/api/knowledge-tree/*` 精确 POST 路由（含 `check` 连接测试），继承 owner 认证与 Host/Origin fence；不另起服务器；错误信息不回传远端响应内容。
+- `build-client.mjs` 将无依赖 library/UI 的测试源码嵌入现有 Client module loader。修改 library/UI 后必须重新 build。
+- 本地依旧以自包含 data URL 保存配图；IndexedDB 容量由浏览器管理。默认无远端请求；主动刷新/查看/Pull/Push/测试连接才访问 GitHub。
+- 仅支持已存在的一个仓库与分支、手动同步；不创建分支/PR/仓库，不做定时同步与三方合并。快照恢复创建无关联新本地副本。
+- 测试：`tests/git-sync.test.js` 用真实 git + 本地裸仓库（`url.insteadOf` 将 SSH 地址映射到本地）覆盖 push/pull/no-op/冲突/图片/部分上传/分支缺失；`tests/knowledge-host-ssh.test.js` 走完整 Host 服务路径；`tests/github-sync.test.js` 继续覆盖共享格式与旧 REST 适配器。
+

@@ -1,34 +1,39 @@
+import { execFile } from 'node:child_process';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { createGithubSync, canonicalDocumentHash } from './github-sync.js';
+import { canonicalDocumentHash } from './github-sync.js';
+import { createGitSync, validateGitConfig } from './git-sync.js';
 
-const METHODS = ['status', 'configure', 'disconnect', 'listTrees', 'readTree', 'pushTree', 'hashDocument'];
+const METHODS = ['status', 'configure', 'disconnect', 'check', 'listTrees', 'readTree', 'pushTree', 'hashDocument'];
 const MAX_REQUEST_BYTES = 64 * 1024 * 1024;
-
-export function validateConfiguration(value) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw problem('INVALID_CONFIG', '请输入 GitHub 仓库配置。');
-  const config = {};
-  for (const key of ['owner', 'repo', 'branch', 'directory']) {
-    if (typeof value[key] !== 'string') throw problem('INVALID_CONFIG', '仓库、分支和目录必须填写。');
-    config[key] = value[key].trim();
-  }
-  if (!/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/.test(config.owner) || !/^[A-Za-z0-9_.-]{1,100}$/.test(config.repo) || ['.', '..'].includes(config.repo)) throw problem('INVALID_CONFIG', 'GitHub 用户名或仓库名无效。');
-  if (!config.branch || config.branch.length > 200 || /[\x00-\x20\x7f~^:?*\[\\]/.test(config.branch) || config.branch.includes('..') || config.branch.includes('@{') || config.branch.endsWith('.') || config.branch.startsWith('/') || config.branch.endsWith('/') || config.branch.includes('//') || config.branch.split('/').some(part => part.startsWith('.') || part.endsWith('.lock'))) throw problem('INVALID_CONFIG', 'GitHub 分支名无效。');
-  if (!config.directory || config.directory.length > 200 || !config.directory.split('/').every(part => /^[A-Za-z0-9_-][A-Za-z0-9_.-]*$/.test(part) && part !== '.' && part !== '..')) throw problem('INVALID_CONFIG', '目录必须是仓库中的安全相对路径，例如 knowledge-trees。');
-  return config;
-}
 
 function problem(code, message) { return Object.assign(new Error(message), { code }); }
 
-/** Token is held only in Host memory (or supplied by the Host environment), never on disk. */
-export function createHostService({ configPath, environment = process.env, fetchImpl = globalThis.fetch } = {}) {
+/** Accepts the SSH config, and migrates a previously saved HTTPS config to its SSH remote. */
+export function validateConfiguration(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw problem('INVALID_CONFIG', '请输入 SSH 仓库配置。');
+  let input = value;
+  if (typeof input.remote !== 'string' && typeof input.owner === 'string' && typeof input.repo === 'string') {
+    const repo = String(input.repo).replace(/\.git$/, '');
+    input = { remote: `git@github.com:${input.owner}/${repo}.git`, branch: input.branch, directory: input.directory };
+  }
+  try {
+    return validateGitConfig(input);
+  } catch (error) {
+    const message = error.code === 'INVALID_CONFIG' ? 'SSH 仓库配置无效：需要形如 git@github.com:owner/repo.git 的地址、合法分支和安全目录。' : 'SSH 仓库配置无效。';
+    throw problem(error.code || 'INVALID_CONFIG', message);
+  }
+}
+
+/** Repository config lives on disk; SSH credentials come from the user's ssh-agent / ~/.ssh/config. */
+export function createHostService({ configPath, environment = process.env } = {}) {
   const profile = String(environment.DSH_PROFILE || 'default').replace(/[^A-Za-z0-9_-]/g, '_');
   configPath ||= join(environment.DSH_HOME || join(homedir(), '.dsh'), 'storages', 'knowledge-tree', profile + '.json');
-  let sessionToken = '';
   let config = null;
   let loaded = false;
+  let gitAvailable = null;
   let queue = Promise.resolve();
 
   async function load() {
@@ -37,26 +42,48 @@ export function createHostService({ configPath, environment = process.env, fetch
       const saved = JSON.parse(await readFile(configPath, 'utf8'));
       config = validateConfiguration(saved);
     } catch (error) {
-      if (error.code !== 'ENOENT') throw problem('CONFIG_READ_FAILED', 'GitHub 配置无法读取；原文件未被覆盖。');
+      if (error.code !== 'ENOENT') throw problem('CONFIG_READ_FAILED', 'SSH 仓库配置无法读取；原文件未被覆盖。');
     }
     loaded = true;
   }
-  function token() { return sessionToken || environment.KNOWLEDGE_TREE_GITHUB_TOKEN || ''; }
+
+  function checkGit() {
+    if (gitAvailable !== null) return Promise.resolve(gitAvailable);
+    return new Promise((resolve) => {
+      execFile('git', ['--version'], { timeout: 10_000 }, (error) => {
+        gitAvailable = !error;
+        resolve(gitAvailable);
+      });
+    });
+  }
+
   async function status() {
     await load();
-    return { configured: config !== null, config, credentialAvailable: Boolean(token()), credentialSource: sessionToken ? 'session' : token() ? 'environment' : 'none' };
+    const available = await checkGit();
+    return {
+      configured: config !== null,
+      config,
+      transport: 'ssh',
+      gitAvailable: available,
+      gitVersion: available ? 'git' : null,
+    };
   }
+
   async function save(next) {
     await mkdir(join(configPath, '..'), { recursive: true, mode: 0o700 });
     const temp = configPath + '.' + randomUUID() + '.tmp';
     await writeFile(temp, JSON.stringify(next, null, 2) + '\n', { mode: 0o600, flag: 'wx' });
     await rename(temp, configPath);
   }
-  const github = createGithubSync({ fetchImpl, getConfig: async () => {
-    await load();
-    if (!config) throw problem('NOT_CONFIGURED', '请先配置 GitHub 仓库。');
-    return config;
-  }, getToken: async () => token() });
+
+  const git = createGitSync({
+    environment,
+    getConfig: async () => {
+      await load();
+      if (!config) throw problem('NOT_CONFIGURED', '请先配置 SSH 仓库地址。');
+      return config;
+    },
+  });
 
   async function execute(method, input = {}) {
     if (!METHODS.includes(method)) throw problem('NOT_FOUND', '未知操作。');
@@ -64,23 +91,22 @@ export function createHostService({ configPath, environment = process.env, fetch
     if (method === 'status') return status();
     if (method === 'configure') {
       const next = validateConfiguration(input);
-      if (input.token !== undefined && (typeof input.token !== 'string' || input.token.length > 1024 || /[\r\n\x00]/.test(input.token))) throw problem('INVALID_TOKEN', 'Token 格式错误。');
+      if (!(await checkGit())) throw problem('GIT_MISSING', MESSAGES.GIT_MISSING);
       await save(next);
       config = next;
       loaded = true;
-      if (input.token) sessionToken = input.token.trim();
       return status();
     }
     if (method === 'disconnect') {
       await load();
-      // Keep the repository configuration for reconnecting. Remove only the session credential.
-      sessionToken = '';
+      // Nothing secret is stored: keep the repository config for reconnecting.
       return status();
     }
     if (method === 'hashDocument') return { hash: await canonicalDocumentHash(input.document) };
-    if (method === 'listTrees') return github.listTrees();
-    if (method === 'readTree') return github.readTree(input.treeId);
-    return github.pushTree(input);
+    if (method === 'check') return git.check();
+    if (method === 'listTrees') return git.listTrees();
+    if (method === 'readTree') return git.readTree(input.treeId);
+    return git.pushTree(input);
   }
 
   return {
@@ -91,20 +117,26 @@ export function createHostService({ configPath, environment = process.env, fetch
       queue = work.catch(() => {});
       return work;
     },
-    dispose() { sessionToken = ''; },
+    dispose() {},
   };
 }
 
 const MESSAGES = {
-  INVALID_CONFIG: 'GitHub 仓库配置无效。', INVALID_TREE_ID: '知识树标识无效。',
-  INVALID_DOCUMENT: '知识树数据校验失败，未上传。', INVALID_REMOTE: '远端文件不完整或格式无效，未覆盖本地。',
-  NOT_FOUND: '远端仓库、分支或知识树不存在，或没有读取权限。',
+  INVALID_CONFIG: 'SSH 仓库配置无效。',
+  INVALID_TREE_ID: '知识树标识无效。',
+  INVALID_DOCUMENT: '知识树数据校验失败，未上传。',
+  INVALID_REMOTE: '远端文件不完整或格式无效，未覆盖本地。',
+  NOT_FOUND: '远端仓库、分支或知识树不存在，或当前 SSH 密钥没有权限。',
   CONFLICT: '远端已变化，请先查看远端；本次没有覆盖。',
   REF_CONFLICT: '提交期间远端分支发生变化，请刷新后重试；未强制覆盖。',
   LIMIT_EXCEEDED: '数据超过本版支持的大小限制，未执行覆盖。',
-  HTTP_ERROR: 'GitHub 请求失败，请检查网络、Token 权限与仓库配置。',
-  TIMEOUT: 'GitHub 请求超时，请稍后重试。',
-  AUTH_ERROR: '请在 GitHub 配置中填写本次运行使用的 PAT，或给 Host 设置 KNOWLEDGE_TREE_GITHUB_TOKEN。',
+  GIT_MISSING: '未找到 git 命令，请先安装 git（macOS 可运行 xcode-select --install）。',
+  SSH_AUTH: 'SSH 认证失败：请确认公钥已添加到 GitHub，且 ssh -T git@github.com 在本机可用。',
+  NETWORK: '无法连接 GitHub（SSH）：请检查网络、代理与 SSH 配置。',
+  GIT_ERROR: 'Git 操作失败：请检查 SSH 配置与仓库状态。',
+  TIMEOUT: 'Git 操作超时，请稍后重试。',
+  HTTP_ERROR: '远端请求失败，请检查网络与仓库配置。',
+  AUTH_ERROR: 'SSH 认证失败：请确认本机 SSH 密钥可用。',
 };
 
 /** Routes inherit DSH connection's owner authentication and Host/Origin fence. */
@@ -126,7 +158,7 @@ export function registerHostRoutes(ctx, service) {
           return new Response(JSON.stringify({ ok: true, result: await service.call(method, input) }), { headers });
         } catch (error) {
           const code = /^[A-Z_]+$/.test(error.code || '') ? error.code : 'INTERNAL_ERROR';
-          const message = MESSAGES[code] || ({ INVALID_REQUEST: '请求格式错误。', INVALID_TOKEN: 'Token 格式错误。', NOT_CONFIGURED: '请先配置 GitHub 仓库。', CONFIG_READ_FAILED: 'Host 无法读取 GitHub 配置，未覆盖原配置。' })[code] || '操作失败，请检查 Host 配置或重试。';
+          const message = MESSAGES[code] || ({ INVALID_REQUEST: '请求格式错误。', NOT_CONFIGURED: '请先配置 SSH 仓库地址。', CONFIG_READ_FAILED: 'Host 无法读取 SSH 仓库配置，未覆盖原配置。' })[code] || '操作失败，请检查 Host 配置或重试。';
           return new Response(JSON.stringify({ ok: false, error: { code, message } }), { status: code.includes('CONFLICT') ? 409 : code === 'NOT_FOUND' ? 404 : 400, headers });
         }
       },

@@ -32,7 +32,17 @@ export function createWorkspaceComponents(React) {
     }
     return clone(edited);
   };
-  const remotePrefix = (config) => JSON.stringify([config.owner, config.repo, config.branch, config.directory]) + '/';
+  // Tolerate a Host that still returns the pre-SSH config shape ({owner, repo}): display its
+// equivalent SSH remote instead of `undefined`, and migrate it on the next save.
+  const remoteText = (config) => {
+    if (!config) return '';
+    if (typeof config.remote === 'string') return config.remote;
+    if (typeof config.owner === 'string' && typeof config.repo === 'string') {
+      return `git@github.com:${config.owner}/${String(config.repo).replace(/\.git$/, '')}.git`;
+    }
+    return '';
+  };
+  const remotePrefix = (config) => JSON.stringify([remoteText(config), config.branch, config.directory]) + '/';
   const cachedSnapshot = (row) => row && (row.snapshot || row);
   const errorText = (error) => error && error.message ? error.message : String(error || '未知错误');
   const hashValue = (result) => typeof result === 'string' ? result : result && (result.hash || result.documentHash);
@@ -98,7 +108,7 @@ export function createWorkspaceComponents(React) {
     const [notice, setNotice] = useState('');
     const [error, setError] = useState('');
     const [configOpen, setConfigOpen] = useState(false);
-    const [form, setForm] = useState({ owner: '', repo: '', branch: 'main', directory: 'knowledge-trees', token: '' });
+    const [form, setForm] = useState({ remote: 'git@github.com:', branch: 'main', directory: 'knowledge-trees' });
     const [deleteId, setDeleteId] = useState(null);
     const [treeMenu, setTreeMenu] = useState(null);
     const menuRef = useRef(null);
@@ -209,7 +219,7 @@ export function createWorkspaceComponents(React) {
     };
     const readRemote = async (treeId) => {
       const config = configRef.current;
-      if (!config) throw new Error('请先配置 GitHub 仓库。');
+      if (!config) throw new Error('请先配置 SSH 仓库地址。');
       const response = await rpc('readTree', { treeId });
       if (!response || response.found === false || response.notFound || !response.document) throw new Error('远端知识树不存在或无法读取；未更改任何本地内容。');
       // Hash/cache the exact remote document. Normalization is an editor projection only.
@@ -235,7 +245,7 @@ export function createWorkspaceComponents(React) {
       }
     });
     const refreshRemote = () => run(async () => {
-      if (!configRef.current) throw new Error('请先配置 GitHub 仓库。');
+      if (!configRef.current) throw new Error('请先配置 SSH 仓库地址。');
       const result = await rpc('listTrees', {});
       const items = Array.isArray(result) ? result : result && (result.trees || result.items) || [];
       setRemoteItems(items.map((item) => typeof item === 'string' ? { treeId: item, title: item } : { ...item, treeId: item.treeId || item.id }));
@@ -262,7 +272,7 @@ export function createWorkspaceComponents(React) {
           if (!alive.current) return;
           setStatus(result);
           configRef.current = result.configured ? result.config : null;
-          if (result.config) setForm({ ...result.config, token: '' });
+          if (result.config) setForm({ remote: remoteText(result.config), branch: result.config.branch, directory: result.config.directory });
           if (configRef.current) {
             const cached = await library.listRemote(remotePrefix(configRef.current));
             if (alive.current) setRemoteItems((cached || []).map((row) => {
@@ -270,7 +280,7 @@ export function createWorkspaceComponents(React) {
               return { ...item, treeId: item.treeId || (row.remoteKey || row.key || '').slice(remotePrefix(configRef.current).length), cached: true };
             }));
           }
-        } catch (reason) { showError(new Error(`GitHub 状态不可用（本地仍可编辑）：${errorText(reason)}`)); }
+        } catch (reason) { showError(new Error(`SSH 同步状态不可用（本地仍可编辑）：${errorText(reason)}`)); }
       })();
       return () => { alive.current = false; };
     }, []);
@@ -387,31 +397,25 @@ export function createWorkspaceComponents(React) {
         if (records[0]) await activate(records[0], true);
         else await remember(null);
       }
-      setNotice('本地知识树已删除；GitHub 远端内容未删除。');
+      setNotice('本地知识树已删除；SSH 远端内容未删除。');
     });
     const configure = (event) => {
       event.preventDefault();
       run(async () => {
-        const input = { owner: form.owner.trim(), repo: form.repo.trim(), branch: form.branch.trim(), directory: form.directory.trim() };
-        if (!input.owner || !input.repo || !input.branch || !input.directory) throw new Error('请填写仓库所有者、仓库名称、分支和目录。');
-        if (form.token.trim()) input.token = form.token.trim();
+        const input = { remote: form.remote.trim(), branch: form.branch.trim(), directory: form.directory.trim() };
+        if (!input.remote || !input.branch || !input.directory) throw new Error('请填写 SSH 远端地址、分支和目录。');
         const result = await rpc('configure', input);
         const next = result && typeof result.configured === 'boolean' ? result : await rpc('status', {});
         configRef.current = next.configured ? next.config : null;
         setStatus(next);
-        setForm({ ...(next.config || input), token: '' });
+        setForm(next.config ? { remote: remoteText(next.config), branch: next.config.branch, directory: next.config.directory } : input);
         setRemote(null); setRemoteItems([]); setConflict(null); setConfigOpen(false);
-        setNotice('仓库配置已保存。没有自动上传；请手动刷新远端目录。');
+        setNotice('SSH 仓库配置已保存。没有自动上传；请手动刷新远端目录。');
       });
     };
-    const disconnect = () => run(async () => {
-      await rpc('disconnect', {});
-      const next = await rpc('status', {});
-      configRef.current = next.configured ? next.config : null;
-      setStatus(next);
-      setForm((value) => ({ ...value, token: '' }));
-      setRemote(null); setRemoteItems([]); setConflict(null); setConfigOpen(false);
-      setNotice('已清除主机本次会话的 PAT；仓库配置和本地知识树仍保留。若主机设置了环境变量令牌，该凭据仍然可用。');
+    const checkConnection = () => run(async () => {
+      const result = await rpc('check', {});
+      setNotice(`SSH 连接正常：${result.remote}（${result.branch}）@ ${String(result.commitSha).slice(0, 8)}`);
     });
     const push = () => run(async () => {
       setPushing(true);
@@ -443,7 +447,7 @@ export function createWorkspaceComponents(React) {
           context.record = result || await library.getLocal(context.id);
         });
       } catch (reason) {
-        throw new Error(`GitHub 推送已成功，但本地同步基线记录失败：${errorText(reason)}。远端提交已存在，请勿误认为推送失败而重复覆盖。`);
+        throw new Error(`远端推送已成功，但本地同步基线记录失败：${errorText(reason)}。远端提交已存在，请勿误认为推送失败而重复覆盖。`);
       }
       await refreshLocals(); update();
       setPushOpen(false);
@@ -544,8 +548,8 @@ export function createWorkspaceComponents(React) {
     return h('section', { className: 'ktw', 'aria-label': '知识树工作区' },
       h('style', null, css + menuCss),
       h('header', null, h('strong', null, '知识树工作区'), h('span', { className: 'kw-muted' }, '本地优先 · 只有点击推送才上传'),
-        h('button', { type: 'button', disabled: busy, onClick: () => setConfigOpen(true) }, 'GitHub 配置'),
-        h('span', { className: 'kw-muted' }, status && status.configured ? `${status.config.owner}/${status.config.repo} · ${status.credentialAvailable ? status.credentialSource === 'environment' || status.credentialSource === 'env' ? '环境变量令牌可用' : '凭据可用' : '无可用令牌（读取和推送均需令牌）'}` : '未连接 GitHub')),
+        h('button', { type: 'button', disabled: busy, onClick: () => setConfigOpen(true) }, 'SSH 配置'),
+        h('span', { className: 'kw-muted' }, status && status.configured ? `${remoteText(status.config)} · ${status.config.branch}${status.gitAvailable === false ? ' · 未找到 git' : ''}` : '未配置 SSH 远端')),
       error && h('div', { role: 'alert', className: 'kw-notice kw-error' }, error),
       notice && h('div', { role: 'status', className: 'kw-notice' }, notice),
       h('div', { className: 'kw-body', 'aria-busy': busy || !ready },
@@ -561,7 +565,7 @@ export function createWorkspaceComponents(React) {
               onKeyDown: (event) => { if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) openTreeMenu(event, record, true); else if (event.key === 'F2') { event.preventDefault(); if (!busyRef.current) openNameDialog(record); } },
             }, title(record)),
             deleteId === record.id && h('div', { className: 'kw-inline' }, h('p', null, '仅删除本地树，确定吗？'), h('button', { type: 'button', disabled: busy, onClick: () => deleteTree(record.id) }, '确认删除'), ' ', h('button', { type: 'button', disabled: busy, onClick: () => setDeleteId(null) }, '取消'))))),
-          h('h2', null, 'GitHub 远端'),
+          h('h2', null, 'SSH 远端'),
           h('button', { type: 'button', disabled: busy || !status?.configured, onClick: refreshRemote }, '手动刷新远端目录'),
           h('p', { className: 'kw-muted' }, '点击只读浏览，不会导入或覆盖本地。'),
           h('ul', null, remoteItems.filter((item) => item.treeId).map((item) => h('li', { key: item.treeId }, h('button', { type: 'button', className: 'kw-tree', disabled: busy, 'aria-current': remote?.treeId === item.treeId, onClick: () => openRemote(item.treeId) }, `${item.title || item.document?.title || item.treeId}${item.cached ? '（缓存）' : ''}`))))),
@@ -597,16 +601,16 @@ export function createWorkspaceComponents(React) {
         nameError && h('p', { role: 'alert', className: 'kw-error' }, nameError),
         h('div', { className: 'kw-actions' }, h('button', { type: 'submit', disabled: busy }, nameDialog.id === null ? '创建' : '保存名称'), h('button', { type: 'button', disabled: busy, onClick: () => setNameDialog(null) }, '取消')))),
       configOpen && h('div', { className: 'kw-dialog' }, h('form', { role: 'dialog', 'aria-modal': true, 'aria-labelledby': 'kw-config-title', onSubmit: configure },
-        h('h2', { id: 'kw-config-title' }, 'GitHub 仓库配置'),
-        h('p', null, '只连接你有权使用的仓库。配置后不会自动上传。公开仓库中的卡片正文和图片对所有人可见，请勿上传隐私内容。'),
-        [['owner', '仓库所有者'], ['repo', '仓库名称'], ['branch', '分支'], ['directory', '目录']].map(([key, label]) => h('label', { key }, label, h('input', { value: form[key], required: true, disabled: busy, onChange: (event) => setForm((value) => ({ ...value, [key]: event.target.value })) }))),
-        h('details', null, h('summary', null, '个人访问令牌（PAT）：用途与权限说明'), h('p', null, '当前连接器读取和推送均需要令牌；推送需要仓库 Contents 读写权限。建议使用仅授权该仓库的细粒度令牌。PAT 只保留在主机内存会话，插件重载或应用重启后需要重新填写；也可由主机环境变量 KNOWLEDGE_TREE_GITHUB_TOKEN 提供。不会写入本地知识树、浏览器 localStorage 或磁盘，也不会由配置接口回传。留空会保留现有凭据。'), h('label', null, 'PAT（可选）', h('input', { type: 'password', value: form.token, autoComplete: 'new-password', disabled: busy, onChange: (event) => setForm((value) => ({ ...value, token: event.target.value })) }))),
-        h('div', { className: 'kw-actions' }, h('button', { type: 'submit', disabled: busy }, '保存配置'), h('button', { type: 'button', disabled: busy, onClick: () => { setConfigOpen(false); setForm((value) => ({ ...value, token: '' })); } }, '取消'), h('button', { type: 'button', disabled: busy || !status?.configured, onClick: disconnect }, '清除本次会话 PAT')))),
+        h('h2', { id: 'kw-config-title' }, 'SSH 仓库配置'),
+        h('p', null, '通过本机 git 以 SSH 推送（不保存任何令牌）。只连接你有权使用的仓库；配置后不会自动上传。公开仓库中的卡片正文和图片对所有人可见，请勿上传隐私内容。'),
+        [['remote', 'SSH 远端地址（git@github.com:owner/repo.git）'], ['branch', '分支'], ['directory', '目录']].map(([key, label]) => h('label', { key }, label, h('input', { value: form[key], required: true, disabled: busy, onChange: (event) => setForm((value) => ({ ...value, [key]: event.target.value })) }))),
+        h('details', null, h('summary', null, 'SSH 前置条件'), h('p', null, '需要在 Host 所在机器上：1) 已安装 git；2) 已生成并添加 SSH 公钥到 GitHub；3) ssh -T git@github.com 能正常通过（使用 ssh-agent 或 ~/.ssh/config）。插件不读取、不保存私钥，凭证完全交给系统 SSH。首次连接 GitHub 时请先在终端完成 known_hosts 指纹确认。')),
+        h('div', { className: 'kw-actions' }, h('button', { type: 'submit', disabled: busy }, '保存配置'), h('button', { type: 'button', disabled: busy || !status?.configured, onClick: checkConnection }, '测试连接'), h('button', { type: 'button', disabled: busy, onClick: () => setConfigOpen(false) }, '取消')))),
       pushOpen && current && h('div', { className: 'kw-dialog' }, h('form', { role: 'dialog', 'aria-modal': true, 'aria-labelledby': 'kw-push-title', onSubmit: (event) => { event.preventDefault(); push(); } },
         h('h2', { id: 'kw-push-title' }, '确认推送当前本地树'), h('p', null, `仅推送「${title({ document: current.draft.document })}」，不会上传其他本地树。`),
         h('p', null, counts(current.draft.document)), h('p', { className: 'kw-muted' }, '预览包含正文、关系和图片。点击推送时捕获已保存版本；推送期间仍可编辑，新编辑不会被覆盖。公开仓库内容对所有人可见。'),
         h('label', null, '提交说明', h('textarea', { value: message, required: true, disabled: busy, onChange: (event) => setMessage(event.target.value) })),
-        h('div', { className: 'kw-actions' }, h('button', { type: 'submit', disabled: busy || !!current.pending || !!current.error }, busy ? '正在推送…' : '确认推送到 GitHub'), h('button', { type: 'button', disabled: busy, onClick: () => setPushOpen(false) }, '取消')))));
+        h('div', { className: 'kw-actions' }, h('button', { type: 'submit', disabled: busy || !!current.pending || !!current.error }, busy ? '正在推送…' : '确认通过 SSH 推送'), h('button', { type: 'button', disabled: busy, onClick: () => setPushOpen(false) }, '取消')))));
   }
   return { Workspace };
 }

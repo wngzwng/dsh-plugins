@@ -1,7 +1,7 @@
 # DSH Plugins
 
 面向 [DeepSeek Harness](https://deepseek.com)（DSH）Web UI 的插件集合。每个插件都是独立的 DSH bundle：
-基础插件的 Host 半只登记清单；知识树另有已鉴权的 GitHub 同步 Host 服务；提示库另有可选的 AI 评价 Host 路由（复用 DSH 已配置的模型服务）。界面在浏览器半 `client.js` 里实现，挂到 Harness 的
+基础插件的 Host 半只登记清单；知识树另有已鉴权的 SSH 同步 Host 服务（调用系统 git）；提示库另有可选的 AI 评价 Host 路由（复用 DSH 已配置的模型服务）。界面在浏览器半 `client.js` 里实现，挂到 Harness 的
 既定槽位（输入框 dock、左侧栏、整页 `main` 面板等）上。颜色统一走主题 token，跟随浅色 / 深色。
 
 ## 插件
@@ -38,11 +38,11 @@ git clone git@github.com:wngzwng/dsh-plugins.git
 - 依赖 DSH 客户端插件机制：`package.json` 中的 `dsh.bundle.patch` 与 `dsh.client`、
   `cordis.patch.yml` 插入 Host 行、`client.js` 通过 `window.__ModuleLoader__.load` 注册浏览器半。
 - 只从共享模块表取 `react` / `react-dom`（提示库用 `createPortal` 在 composer 外层渲染弹层），不依赖 Harness 内部包。
-- 组件、图标、字体与绘制元素随插件打包。知识树仅在用户主动操作 GitHub 同步时通过 Host 访问 GitHub API。
+- 组件、图标、字体与绘制元素随插件打包。知识树仅在用户主动操作 SSH 同步时由 Host 调用系统 git 访问 GitHub，不使用任何令牌。
 
 ## 数据与隐私
 
-默认保存在当前浏览器：基础插件使用 `localStorage`，知识树 v2.0 使用 IndexedDB。知识树可选择连接 GitHub，经 Host 手动读取/推送；只有主动 Push 才上传正文与图片，公开仓库内容公开可见。其他插件不上传：
+默认保存在当前浏览器：基础插件使用 `localStorage`，知识树 v2.0 使用 IndexedDB。知识树可选择通过 SSH 连接 GitHub，经 Host 手动读取/推送；只有主动 Push 才上传正文与图片，公开仓库内容公开可见。其他插件不上传：
 
 | 插件 | 存储键 | 内容 |
 | --- | --- | --- |
@@ -119,7 +119,7 @@ prompt-library/
 
 ## 开发
 
-基础插件为纯前端 bundle；知识树增加 Host 服务，修改 `library.js` 或 `workspace-ui.js` 后先运行 `node knowledge-tree/build-client.mjs` 重新嵌入 Client；提示库修改 `core.js` 或 `src/*.js` 后先运行 `node prompt-library/build-client.mjs`。之后重新加载插件并刷新现有 DSH 页面：
+基础插件为纯前端 bundle；知识树增加 Host 服务，修改 `library.js`、`workspace-ui.js` 或 `client.js` 后先运行 `node knowledge-tree/build-client.mjs` 重新嵌入 Client；修改 `host-service.js`、`git-sync.js`、`github-sync.js` 属于 Host 进程内模块，需要重启 DSH 才会生效；提示库修改 `core.js` 或 `src/*.js` 后先运行 `node prompt-library/build-client.mjs`。之后重新加载插件并刷新现有 DSH 页面：
 
 - 元数据（名称、图标、加载方式）在 `package.json` 的 `dsh` 字段；
 - 挂载点由 `cordis.patch.yml` 与 `client.js` 里的 slot / key 决定；

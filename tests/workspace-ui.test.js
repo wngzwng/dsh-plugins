@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import { createWorkspaceComponents } from '../knowledge-tree/workspace-ui.js';
 
 const copy = (value) => structuredClone(value);
-const config = { owner: 'owner', repo: 'repo', branch: 'main', directory: 'trees' };
+const config = { remote: 'git@github.com:owner/repo.git', branch: 'main', directory: 'trees' };
 const prefix = JSON.stringify(Object.values(config)) + '/';
 const document = (title) => ({ version: 3, stage: 'brainstorm', title, cards: [{ id: 'card', title: '卡片', content: '正文', image: null }], links: [] });
 const hash = (doc) => createHash('sha256').update(JSON.stringify(doc)).digest('hex');
@@ -56,7 +56,7 @@ function harness(initial = [], remotes = {}) {
   };
   const rpc = async (method, input) => {
     calls.push({ method, input: copy(input) });
-    if (method === 'status') return { configured: true, credentialAvailable: true, config };
+    if (method === 'status') return { configured: true, transport: 'ssh', gitAvailable: true, config };
     if (method === 'hashDocument') return { hash: hash(input.document) };
     if (method === 'listTrees') return Object.entries(remotes).map(([treeId, doc]) => ({ treeId, title: doc.title }));
     if (method === 'readTree') { if (h.offline) throw new Error('offline'); return remotes[input.treeId] ? { document: copy(remotes[input.treeId]) } : { found: false }; }
