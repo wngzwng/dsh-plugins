@@ -52,13 +52,16 @@ test('constants match the storage contract', () => {
   assert.equal(core.STORAGE_KEY, 'dsh-prompt-library/v1')
   assert.equal(core.UI_KEY, 'dsh-prompt-library:ui/v1')
   assert.equal(core.AI_REVIEW_MAX_CHARS, 200)
-  assert.deepEqual(core.VIEWS, ['all', 'favorites', 'recent'])
+  assert.deepEqual(core.VIEWS, ['all', 'inbox', 'favorites', 'recent'])
   assert.deepEqual(core.QUALITY_FILTERS, ['any', 'rated4', 'rated3', 'unrated', 'stale'])
   assert.deepEqual(core.SORTS, ['default', 'updated', 'recent', 'ratingDesc', 'ratingAsc'])
-  assert.deepEqual(core.CSV_HEADERS, ['title', 'body', 'tags', 'usage', 'rating', 'note'])
+  assert.deepEqual(core.CSV_HEADERS, ['title', 'body', 'tags', 'usage', 'rating', 'note', 'organize', 'sourceNote'])
   assert.equal(core.CSV_HEADER_ALIASES['标题'], 'title')
   assert.equal(core.CSV_HEADER_ALIASES['个人评分'], 'rating')
   assert.equal(core.CSV_HEADER_ALIASES['个人评价备注'], 'note')
+  assert.equal(core.CSV_HEADER_ALIASES['整理状态'], 'organize')
+  assert.equal(core.CSV_HEADER_ALIASES['来源说明'], 'sourceNote')
+  assert.equal(core.CSV_HEADER_ALIASES['来源'], 'sourceNote')
   assert.deepEqual(core.createEmptyState(T), { version: 1, tags: [], prompts: [] })
 })
 
@@ -648,7 +651,7 @@ test('CSV handles LF rows, empty cells, formula-guarded values and custom row or
   })
   const csv = core.toCsv(data, ['p-2', 'p-1'])
   const lines = csv.split('\r\n').filter(Boolean)
-  assert.equal(lines[0], 'title,body,tags,usage,rating,note')
+  assert.equal(lines[0], 'title,body,tags,usage,rating,note,organize,sourceNote')
   assert.equal(lines[1].startsWith('第二条'), true)
   const parsed = core.parseCsv(csv)
   assert.equal(parsed.ok, true)
@@ -658,7 +661,7 @@ test('CSV handles LF rows, empty cells, formula-guarded values and custom row or
 
   const noTags = core.parseCsv('title,body\nA,B')
   assert.equal(noTags.ok, true)
-  assert.deepEqual(noTags.rows[0], { title: 'A', body: 'B', tags: '', usage: '', rating: '', note: '', line: 2 })
+  assert.deepEqual(noTags.rows[0], { title: 'A', body: 'B', tags: '', usage: '', rating: '', note: '', organize: '', sourceNote: '', line: 2 })
 })
 
 test('CSV guards and restores all formula-leading characters in title/body/usage/note', () => {
@@ -686,10 +689,10 @@ test('CSV guards and restores all formula-leading characters in title/body/usage
 })
 
 test('CSV header aliases, template and structural errors', () => {
-  assert.equal(core.csvTemplate(), 'title,body,tags,usage,rating,note\n')
+  assert.equal(core.csvTemplate(), 'title,body,tags,usage,rating,note,organize,sourceNote\n')
   const aliased = core.parseCsv('标题,正文,标签,个人评分,个人评价备注\nA,B,"[""写作""]",4,好')
   assert.equal(aliased.ok, true)
-  assert.deepEqual(aliased.rows[0], { title: 'A', body: 'B', tags: '["写作"]', usage: '', rating: '4', note: '好', line: 2 })
+  assert.deepEqual(aliased.rows[0], { title: 'A', body: 'B', tags: '["写作"]', usage: '', rating: '4', note: '好', organize: '', sourceNote: '', line: 2 })
 
   assert.equal(core.parseCsv('').error.code, 'CSV_EMPTY')
   assert.equal(core.parseCsv('   \n  ').error.code, 'CSV_EMPTY')

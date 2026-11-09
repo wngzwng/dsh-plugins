@@ -40,6 +40,37 @@ AI 辅助评价由用户主动触发，复用 DSH 已配置的模型服务，仅
 - 复制/插入成功后显示不打断操作的「用后评分」入口。
 - 当前 DSH 无安全插入接口时明确降级为复制（不通过 DOM 模拟输入）。
 
+### 快速收录（Quick capture）
+
+目标：**看到好内容，几秒存下来；分类、评分和 AI 评价都可以以后再做。** 先保存、再整理，原文不改写。
+
+- **入口**
+  - 整页管理面板头部「快速收录」；
+  - 输入框旁快捷面板「快速收录」「保存草稿为提示词」（悬浮即显示说明）；
+  - 会话输入框工具栏「存草稿」图标按钮（仅图标、悬浮/聚焦即时显示说明；整份草稿快照）；
+  - 对话中**选中文本**后的浮层「收录为提示词」（通过 DSH 公开的
+    `ctx.uiConversation.interactions` + `conversation.chat.text-interaction` 扩展点）。
+- **收录弹层**：自动聚焦正文；正文是唯一必填项；标题按正文首个非空行自动生成（≤40 个可见字符，
+  超长加省略号，手动改过标题后不再覆盖，清空则恢复自动建议）；标签复用已有标签、可稍后整理；
+  「更多选项」含使用场景与来源说明；显示「保存到：收件箱」。`Ctrl/Cmd+Enter` 保存（输入法组合期间
+  不触发），`Esc` 关闭时对未保存内容二次确认；保存中防重复提交；保存失败保留全部输入并显示原因。
+  ｜ 成功后才显示「已收录」，提供「查看」（跳到管理面板并选中该条）和「继续收录」（清空正文/标题/
+  来源/场景/标签、重新聚焦正文，不继承上一条标签）。
+- **收件箱**：快速收录默认进入「收件箱」整理状态（不是标签）；收件箱条目同样支持搜索、复制、插入、
+  评分和加标签；详情页可「标记整理完成」或「重新移回收件箱」，与评分/标签/收藏/置顶互不影响；
+  旧数据升级默认「已整理」，不会被批量塞进收件箱。
+- **重复提醒**：保存前只比较正文。正文完全相同提示「此内容已收录」；仅首尾空白或换行编码不同提示
+  「疑似重复」；内部空格/缩进/大小写差异不算重复。可选择「查看已有」（弹层内预览，不丢失当前
+  未保存内容）、「返回继续编辑」或「仍然另存」。另存创建独立条目，不继承已有评分/使用次数/AI 评价。
+- **来源元数据**：记录来源类型（手动粘贴 / 输入框草稿 / 对话消息）、收录时间、可选来源说明，
+  输入框/对话来源还会记录来源会话 id（消息 id 字段已预留，受接口限制目前无法获得）。来源信息独立
+  保存，不随复制/插入正文，不上传；详情页可尝试「打开来源会话」，会话已不可用时给出明确反馈且
+  正文仍然可用。收录时间与创建/更新时间语义分开，后续编辑不改变收录时间。
+- **限制（当前 DSH 0.2.2-rc.1）**：输入框没有安全的选区读取接口，因此「存草稿」收录**整份草稿**
+  并在弹层说明（若只需选区，请复制后使用快速收录）；没有通用「单条消息操作菜单」扩展点，因此
+  **不支持从消息菜单收录整条消息**，可用选中文本收录替代；两点均不使用宿主 DOM 强行模拟。
+  首版不提供 AI 辅助整理/改写（保存成功后仍可使用详情页现有的 AI 评价）。
+
 ### 正文显示：纯文本 / Markdown 预览
 
 - 默认按**纯文本**显示（`white-space: pre-wrap`），完全保留原始换行、空白与 Markdown 标记字面值。
@@ -85,7 +116,7 @@ AI 辅助评价由用户主动触发，复用 DSH 已配置的模型服务，仅
 
 ### 导入 / 导出
 
-- **CSV**（用于交换）：列 `title,body,tags,usage,rating,note`（也接受中文表头别名）。
+- **CSV**（用于交换）：列 `title,body,tags,usage,rating,note,organize,sourceNote`（也接受中文表头别名，如 `整理状态`、`来源说明`）。
   多标签编码为 **JSON 数组字符串**（如 `["写作","代码"]`），因此标签名内的逗号、引号不会
   被错误拆分；按 RFC 4180 处理中文、引号、逗号和跨行正文；评分限定 0.5 步进的 1～5 星。
   导出时对 `= + - @` 等公式前导字符加 `'` 防护，导入时对称还原（见下文限制）。
@@ -102,8 +133,10 @@ AI 辅助评价由用户主动触发，复用 DSH 已配置的模型服务，仅
 ## 数据保存位置与隐私
 
 - 数据保存在**当前浏览器当前访问地址的 `localStorage`**：
-  - 提示词/标签/评分/AI 评价：键 `dsh-prompt-library/v1`
-  - 界面偏好（视图/筛选/排序）：键 `dsh-prompt-library:ui/v1`
+  - 提示词/标签/评分/AI 评价/整理状态/收录来源：键 `dsh-prompt-library/v1`
+  - 界面偏好（视图/筛选/排序/正文显示方式）：键 `dsh-prompt-library:ui/v1`
+- 快速收录的来源信息（来源类型、收录时间、可选来源会话 id、来源说明）只随提示词本地保存；
+  不默认上传、不自动同步，CSV 导出不包含来源会话标识，JSON 备份完整保留。
   - 清理站点数据、更换浏览器、更换访问地址（如端口变化）、更换设备或使用隐私模式，
     都可能导致数据不可见或丢失；请用 JSON 完整备份迁移。
 - 不默认上传、不自动启用第三方同步；首版不含 iCloud 或其他云同步。
@@ -177,12 +210,13 @@ node --test tests/*.test.js                  # 全仓库回归（不破坏既有
 | --- | --- | --- |
 | `tests/prompt-library-core.test.js` | 评分合法性/有效/待复评、正文版本、默认/显式/评分排序、recent 严格排序、搜索与组合筛选、标签 trim/重名/排序、CSV 往返与公式防护、CSV 导入预览、JSON 备份校验/合并/替换、200 可见字符校验 | 47/47 |
 | `tests/prompt-library-host.test.js` | 假 ctx 的两条路由：模型解析、请求只含 title/body/usage、无 tools/session、最低 reasoning effort 选择与缓存、超 200 压缩一次、空/错误/截断/超长/超时/并发上限/Origin 403、日志与响应不泄漏正文/密钥 | 28/28 |
-| `tests/prompt-library-panel.test.js` | 整页面板：首用/空态、新建必填、编辑未保存确认、删除与标签删除二次确认、标签管理、收藏/置顶、排序与筛选、半星评分/备注/待复评/沿用、AI 状态/成功/失败/过期/草稿关联、复制与用后评分、CSV/JSON 导入预览与替换确认、导出/分享、corrupt/storage-error、窄窗口、i18n 与无障碍 | 28/28 |
-| `tests/prompt-library-quick.test.js` | 快捷入口：分区与搜索、复制/插入成功与失败、无插入接口降级、用后评分、键盘、Esc、会话切换安全、空态/无结果、i18n | 20/20 |
-| `tests/prompt-library-integration.test.js` | 三个槽位注册、中英字典 parity、样式注入与卸载清理、corrupt/新版本/不可用存储不被覆盖、跨标签页刷新、layout 打开整页、下载内容、备注自动保存、Markdown 预览开关/安全渲染/原文复制与偏好持久化 | 20/20 |
+| `tests/prompt-library-panel.test.js` | 整页面板（含收件箱/整理状态/来源元数据/快速收录入口）：首用/空态、新建必填、编辑未保存确认、删除与标签删除二次确认、标签管理、收藏/置顶、排序与筛选、半星评分/备注/待复评/沿用、AI 状态/成功/失败/过期/草稿关联、复制与用后评分、CSV/JSON 导入预览与替换确认、导出/分享、corrupt/storage-error、窄窗口、i18n 与无障碍 | 28/28 |
+| `tests/prompt-library-capture-core.test.js` | 自动标题（首个非空行/去掉 markdown 标记/40 可见字符含省略号/不修改正文）、重复判定（exact vs 仅首尾空白/CRLF 的 near；内部空格与大小写不误判）、organize 迁移与切换不改 updatedAt、capture 规范化、收件箱过滤、CSV 新列与旧文件兼容、JSON 保留新元数据 | 30/30 |
+| `tests/prompt-library-quick.test.js` | 快捷入口：分区与搜索、复制/插入成功与失败、无插入接口降级、用后评分、键盘、Esc、会话切换安全、空态/无结果、i18n、存草稿快照与空禁用、选区收录、收录入口 payload/busy | 32/32 |
+| `tests/prompt-library-integration.test.js` | 三个槽位注册、中英字典 parity、样式注入与卸载清理、corrupt/新版本/不可用存储不被覆盖、跨标签页刷新、layout 打开整页、下载内容、备注自动保存、Markdown 预览开关/安全渲染/原文复制与偏好持久化、快速收录（粘贴/整份草稿/对话选区/自动标题/重复 exact+near/仍然另存/连续收录/保存失败/IME/Esc/防双提交/来源会话快照/收件箱与来源元数据/查看跳转） | 35/35 |
 
 全量回归：`node prompt-library/build-client.mjs && node --test tests/*.test.js`
-→ **218/218 通过**（含既有番茄时钟 / 九宫格 / 待办清单 / 知识树测试，未破坏）。
+→ **290/290 通过**（其中提示库 **214 项**，含 core 47、host 28、capture-core 30、panel 42、quick 32、integration 35；既有番茄时钟 / 九宫格 / 待办清单 / 知识树测试未破坏）。
 另有 `node --check` 覆盖 `client.js`、`core.js`、`index.js`、两个 UI 片段。
 
 **已验证**：上述自动化行为（含 localStorage 持久化、复制/插入 API 调用与拒绝路径、评分版本、
@@ -201,6 +235,11 @@ CSV/JSON 往返、AI Host 请求与错误路径、字典/主题 token/卸载清�
   （插入不可用→复制；AI 不可用→提示），管理功能不受影响。
 - **插入仅从输入框旁快捷面板发起**：整页面板不在 composer 作用域，拿不到 `inputActions`，
   因此详情页提供「复制正文」；请从输入框快捷面板执行“插入输入框”。
+- **快速收录的接口限制**：输入框没有安全的选区读取接口，「存草稿」收录整份草稿并在弹层说明；
+  没有通用「单条消息操作菜单」扩展点，不能从消息菜单收录整条消息，可用选中文本收录替代；
+  没有公开的“跳到具体消息”接口，来源可打开来源会话，消息 id 仅保留字段与说明；这些限制均不通过
+  DOM 模拟绕过。
+- **AI 辅助整理/改写不在首版**：收录过程不调用 AI；保存后可在详情页使用现有 AI 评价（用户主动触发）。
 - 数据仅在当前浏览器当前 origin；**不跨设备同步**。多标签页同时编辑时以最后一次成功写入为准
   （`storage` 事件会刷新其他标签页的显示，但不做冲突合并）。
 - CSV 公式注入防护：导出时对以 `= + - @ \t \r` 开头的字段加前导 `'`，导入时仅当 `'` 后紧跟
@@ -218,5 +257,7 @@ Prompt Library for the DeepSeek Harness Web UI: a sidebar page to save/tag/favor
 search prompts (with half-star personal ratings and version-aware "needs re-rating" state), plus a
 quick picker beside the composer to copy or safely insert a prompt into the current draft. Data is
 stored in this browser's `localStorage`; CSV export/import is for exchange and JSON for full backups.
-An optional, user-triggered AI review uses the DSH model service on the Host half only (no keys in the
-browser) and is shown as a clearly-labelled reference, never as a personal rating.
+Quick capture saves pasted text, the whole composer draft, or selected chat text into an Inbox with an
+auto title, duplicate warnings and independent source metadata. An optional, user-triggered AI review
+uses the DSH model service on the Host half only (no keys in the browser) and is shown as a
+clearly-labelled reference, never as a personal rating.

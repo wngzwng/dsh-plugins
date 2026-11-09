@@ -15,7 +15,7 @@ const root = new URL('./', import.meta.url);
 const START = '    /* BEGIN GENERATED MODULES */';
 const END = '    /* END GENERATED MODULES */';
 
-const parts = ['core.js', 'src/full-panel.js', 'src/quick-picker.js'];
+const parts = ['core.js', 'src/capture.js', 'src/full-panel.js', 'src/quick-picker.js'];
 const sources = [];
 for (const part of parts) {
   let source;

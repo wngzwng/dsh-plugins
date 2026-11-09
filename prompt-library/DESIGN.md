@@ -547,3 +547,140 @@ function createStore({ storage, uuid, now })
    `data-dsh-plugin="prompt-library"` 的 `<style>` 并随卸载移除；测试用
    `tests/helpers/prompt-library-harness.js` 的假 React/portal/document/locale/fetch 渲染真实
    组件树。当前测试：提示库 143 项（core 47、host 28、panel 28、quick 20、integration 20），全量 218/218（含既有插件，其中有并发新增的番茄时钟测试，未受影响）。
+
+## 9. 快速收录（quick capture）实现契约 v1（2026-11 增补）
+
+### 9.1 数据字段（v1 向后兼容，不升 version）
+
+Prompt 新增两个可选字段，`normalizePrompt` 负责补默认值：
+
+```js
+organize: 'inbox' | 'organized'   // 整理状态；缺省/旧数据 => 'organized'（升级不批量进收件箱）
+capture: null | {
+  kind: 'paste' | 'composer' | 'message',  // 来源类型：快速粘贴 / 输入框草稿 / 对话选中文本
+  at: number,                                // 收录时间（ms，创建后不随编辑改变）
+  sessionId?: string,                        // 可选来源会话（composer / message）
+  messageId?: string,                        // 可选来源消息标识（当前 DSH 接口不提供，保留字段）
+  note?: string                              // 可选来源说明（用户填写）
+}
+```
+
+- `createdAt`：条目创建时间；快速收录时与 `capture.at` 相同，后续编辑不变。
+- `updatedAt`：最近内容修改时间（现语义不变）。
+- `capture.at`：收录时间，独立元数据，任何编辑都不修改；普通编辑器新建的条目 `capture=null`。
+- `organize` 是整理状态，不是标签；与评分/收藏/置顶/使用维度相互独立。
+- 来源信息不参与复制/插入正文，不默认上传；JSON 备份完整保留；CSV 只导出整理状态与来源说明，不导出 sessionId/messageId。
+
+### 9.2 core.js 新增（owner: core-capture）
+
+```js
+export const ORGANIZE_STATES = ['inbox', 'organized']
+export const CAPTURE_KINDS = ['paste', 'composer', 'message']
+export function normalizeCapture(raw)                 // null | {kind,at,sessionId?,messageId?,note?}；非法字段清洗，kind 必须合法、at 必须有限数字
+export function suggestCaptureTitle(body, maxChars)   // 首个非空行：去行首 markdown 标记（# > - * + 序号）→ trim → 压缩内部空白为单空格；
+                                                      // 按“可见字符”（码点、空白不计）截断到 40，超长加 '…'；无法生成时回退该行原文 trim；不修改 body
+export function countVisibleChars(text)               // 已存在，复用
+export function findCaptureDuplicates(data, body)     // { exact: Prompt[], near: Prompt[] }
+                                                      // exact: body === prompt.body；
+                                                      // near: normalize(body) === normalize(prompt.body) && body !== prompt.body；
+                                                      // normalize = 换行统一为 \n 后仅 trim 首尾空白；不改保存正文
+                                                      // 不比较标题/标签；不做大小写或内部空白归一；不调用 AI
+export function validateOrganize(value)               // 'inbox'|'organized'，非法 -> undefined
+```
+
+结构调整（同步更新）：
+- `createPrompt(input)` 接受可选 `organize`、`capture`（经 normalize）；默认 `organize='organized'`、`capture=null`。
+- `updatePrompt` 保留 `organize`/`capture`（除非更新对象显式传入，编辑器不会传）。
+- `normalizeState` / `normalizePrompt`：旧数据补 `organize:'organized'`、`capture:null`。
+- `VIEWS = ['all', 'inbox', 'favorites', 'recent']`；`matchesView(prompt,'inbox') => organize==='inbox'`。
+- CSV：`CSV_HEADERS = ['title','body','tags','usage','rating','note','organize','sourceNote']`；
+  `toCsv` 输出 organize（`inbox`/`organized`）与 `capture.note || ''`；`parseCsv` 接受中文别名
+  `整理状态`、`来源说明`/`来源`；`validateCsvRows` 解析 organize（缺省/非法 => 'organized'），
+  导入条目 `capture = sourceNote ? {kind:'paste', at:now, note} : null`，`organize` 按列；
+  重复判定仍按 title+body（不受 organize 影响）。
+- JSON：`validateBackup` 校验并保留 organize/capture；旧备份（无字段）=> organized/null。
+- 新增 `export function setOrganize(prompt, status)` 返回新 Prompt（不刷新 updatedAt）；store 包装为 `store.setOrganize(id,'inbox'|'organized')`。
+
+### 9.3 store / client.js 新增（owner: Lead）
+
+- `store.createPrompt(input)` 接受 `organize`、`capture`，返回值改为 `{ok:true, prompt}`（新增 `prompt` 字段；
+  失败仍 `{ok:false,error}`），供收录成功后的「查看」跳转。
+- `store.setOrganize(id, status)` -> `{ok:true}` | `{ok:false,error}`。
+- 共享 `createFocusRequestStore()`：`{ getSnapshot(): string|null, subscribe(fn), request(id), consume() }`；
+  full panel 消费后选中对应条目（切换到“全部提示词”并清空标签/搜索筛选）。
+- 共享 `createCaptureHub()`（src/capture.js 内定义）：
+  `{ getSnapshot(): {seq, request|null}, subscribe(fn), open({text, source:{kind, sessionId?, messageId?}}), close() }`。
+  `request` 在打开时快照；会话切换不影响；已打开且未保存时再次 open 不覆盖（返回 false）。
+- `apply` 装配：
+  - `shell.overlay` 注册 `id:'prompt-library-capture'` 的 `PromptLibraryCaptureHost`，
+    inject `{capture, store, focus, layout, locale}`；
+  - `conversation.input.right` 追加 `id:'prompt-library-save-draft', order:21` ->
+    `PromptLibrarySaveDraftEntry({store, capture, locale, slotProps})`；
+  - 可选注入 `uiConversation`：注册 interaction id `prompt-library-capture`
+    （仅 `trigger==='selection'` 且 `readText()` 非空白才 `open()`），并注册
+    `conversation.chat.text-interaction` key `prompt-library-capture` ->
+    `PromptLibraryMessageCaptureAction`，inject `{capture}`；服务缺失时静默跳过；
+  - 将 `capture`、`focus`、`openSession(会话跳转：uiWorkspace.openSession)` 传给 FullPanel；
+    quick-picker props 增加 `capture`。
+- 组件契约（由 quick-ui 实现）：
+  - `PromptLibrarySaveDraftEntry(props)`：输入框工具区小按钮「存草稿/保存为提示词」；
+    读 `slotProps.input.draft` 快照后 `capture.open({text, source:{kind:'composer', sessionId}})`；
+    空草稿禁用；绝不 setDraft/submit；不读取选区（在收录弹层中说明降级）。
+  - `PromptLibraryMessageCaptureAction(props)`：选区浮层按钮「收录为提示词」；
+    `readText()` 取文本后 `capture.open({text, source:{kind:'message', sessionId}})` 并 `dismiss()`；
+    不操作 DOM、不写会话。
+- 组件契约（src/capture.js，Lead）：`PromptLibraryCaptureHost` 渲染收录弹层（见 §9.4）。
+
+### 9.4 收录弹层行为（src/capture.js，Lead）
+
+- 打开：自动聚焦正文；`body` 为唯一必填；标题自动建议（首个非空行、≤40 可见字符、超长 `…`），
+  用户改过标题后不再随正文覆盖，清空标题则恢复自动建议；标签列表复用已有标签（按 order），默认不选；
+  「更多选项」折叠：使用场景、来源说明；显示「保存到：收件箱」。
+- 键盘：`Ctrl/Cmd+Enter` 保存（`isComposing`/keyCode 229 时不触发）；`Esc` 未保存内容先确认丢弃；
+  弹层关闭后焦点回到打开前元素（复用共享 Modal）；窄窗口单列。
+- 重复检查（保存前，仅正文）：exact/near 命中时展示匹配项，操作：
+  查看已有（弹层内只读预览，可返回）、返回继续编辑、仍然另存（创建独立条目，不继承评分/使用/AI）。
+- 保存：`store.createPrompt({title, body, usage, tagIds, organize:'inbox', capture:{kind, at:Date.now(), sessionId, messageId, note}})`；
+  成功才显示「已收录」并提供「查看」（关闭弹层 → layout.selectPanel('prompt-library') + focus.request(id)）
+  与「继续收录」（清空正文/标题/来源/使用场景/标签，重新聚焦正文；默认不继承标签）；
+  失败保留全部输入、展示原因、不关闭、可重试；保存中禁用按钮防重复提交。
+- 来源类型提示：composer 来源显示“当前 DSH 接口只提供整份草稿，已收录整份草稿；需要只收选区请复制后快速收录”；
+  message 来源显示“来自对话选中文本”；paste 无提示。
+- 弹层内禁止 AI 调用；AI 辅助整理不在首版实现（保存后可在详情页使用现有 AI 评价）。
+
+### 9.5 管理面板（owner: panel-ui）
+
+- 导航新增「收件箱」视图（含数量）；无条目的空状态文案。
+- 列表/详情显示「待整理」标记；详情新增整理状态操作：「标记整理完成」/「重新移回收件箱」
+  （调 `store.setOrganize`）。
+- 详情显示来源元数据区块（当 `capture` 存在）：来源类型（手动粘贴/输入框草稿/对话消息）、收录时间、
+  来源说明；有 `sessionId` 时提供「打开来源会话」（`props.openSession`，失败/不可用时明确反馈，
+  不影响正文）；messageId 只作说明不伪造跳转。
+- 头部提供「快速收录」按钮：`capture.open({text:'', source:{kind:'paste'}})`。
+- 接收 `focus` 并消费：选中对应条目、切回「全部提示词」、清空标签/搜索/质量筛选。
+- 其余筛选/搜索/排序/评分/复制/插入/导出对收件箱条目照常生效。
+
+### 9.6 首版范围与已知限制
+
+实现：快速粘贴收录（面板/快捷面板）、输入框整份草稿收录、对话选中文本收录、自动标题、
+收件箱与整理状态、重复提醒（exact/near）+ 仍然另存、连续收录、来源元数据、JSON/CSV 兼容。
+不实现：消息操作菜单整条收录（DSH 0.2.2 无受支持的单条消息菜单 slot，不通过 DOM 伪造）；
+输入框选区精确收录（无安全选区文本接口，降级整份草稿并提示复制后快速收录）；
+AI 辅助整理/改写（可选增强，不在首版）；来源消息精确跳转（无公开消息定位 API，
+仅提供来源会话跳转或元数据展示）。
+
+
+### 9.7 实现记录（定稿差异）
+
+1. 收录弹层由 `src/capture.js` 的共享 `PromptLibraryCaptureHost` 承载（root `shell.overlay`），
+   入口只调用 `capture.open({text, source})`；已打开时 `open()` 返回 false，不覆盖未保存内容。
+2. 「继续收录」除正文/标题/标签/场景/来源说明外，来源类型也重置为 `paste`（不继承上一条来源会话）。
+3. 保存入口使用同步 `savingRef` 防抖，快速双击只创建一条；保存失败保留全部字段并允许重试。
+4. 收件箱计数/过滤由 `selectPrompts({view:'inbox'})` 统一实现；整理切换 `setOrganize` 不修改
+   `updatedAt`/`bodyVersion`/正文。
+5. 「查看已收录」通过 `focus` 请求 + `layout.selectPanel('prompt-library')` 打开管理面板并选中条目；
+   重复提醒里的「查看已有」使用弹层内只读预览，不关闭收录弹层，避免丢失未保存内容。
+6. 对话选区收录通过 `conversation.chat.text-interaction` key `prompt-library-capture` 渲染；
+   输入框草稿收录通过 `conversation.input.right` 第二入口 `id:'prompt-library-save-draft'`；
+   两者均不在插件内操作宿主 DOM。来源会话跳转使用 `ctx.uiWorkspace.openSession`，失败就地反馈。
+7. 自动标题按总预算截断：超过 40 个可见字符时保留 39 个可见字符 + `…`（省略号计入 40）。

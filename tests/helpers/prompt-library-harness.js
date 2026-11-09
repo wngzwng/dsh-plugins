@@ -162,6 +162,17 @@ function sameDeps(a, b) {
 function createReact() {
   const Fragment = Symbol('Fragment');
   const instances = new Map();
+  const componentIds = new WeakMap();
+  let nextComponentId = 0;
+  function componentId(type) {
+    let id = componentIds.get(type);
+    if (id === undefined) {
+      nextComponentId += 1;
+      id = nextComponentId;
+      componentIds.set(type, id);
+    }
+    return id;
+  }
   let current = null;
   let pendingEffects = [];
   let dirty = false;
@@ -298,7 +309,8 @@ function createReact() {
       };
     }
     if (typeof node.type === 'function') {
-      let instance = instances.get(path);
+      const instanceKey = path + '#c' + String(componentId(node.type));
+      let instance = instances.get(instanceKey);
       if (instance === undefined) {
         instance = {
           states: [],
@@ -311,7 +323,7 @@ function createReact() {
           effectIndex: 0,
           visited: false,
         };
-        instances.set(path, instance);
+        instances.set(instanceKey, instance);
       }
       instance.visited = true;
       instance.stateIndex = 0;
@@ -357,12 +369,12 @@ function createReact() {
   }
 
   function prune() {
-    for (const [path, instance] of instances) {
+    for (const [key, instance] of instances) {
       if (instance.visited) continue;
       for (const record of instance.effects) {
         if (record !== undefined && typeof record.cleanup === 'function') record.cleanup();
       }
-      instances.delete(path);
+      instances.delete(key);
     }
   }
 
@@ -545,9 +557,32 @@ export function harness(options = {}) {
     },
   };
 
+  const interactions = [];
+  const openSessionCalls = [];
   const services = Object.assign({}, options.services || {});
   if (options.layout !== undefined) services.layout = options.layout;
+  if (options.uiConversation === true && !services.uiConversation) {
+    services.uiConversation = {
+      interactions: {
+        register(definition) {
+          interactions.push(definition);
+          return () => {};
+        },
+        getSnapshot() {
+          return [];
+        },
+      },
+    };
+  }
+  if (options.uiWorkspace === true && !services.uiWorkspace) {
+    services.uiWorkspace = {
+      openSession(sessionId) {
+        openSessionCalls.push(sessionId);
+      },
+    };
+  }
   const slots = {};
+  const slotEntries = {};
   const disposers = [];
 
   const ctx = {
@@ -566,6 +601,14 @@ export function harness(options = {}) {
         }
       }
     },
+    inject(names, callback) {
+      try {
+        callback(ctx);
+      } catch (error) {
+        /* an optional injection callback must not break the harness */
+      }
+      return () => {};
+    },
     get(name) {
       return services[name];
     },
@@ -576,10 +619,17 @@ export function harness(options = {}) {
         return () => {};
       },
       register(config, component) {
-        const key = config.name || config.key;
-        slots[key] = { config, component };
+        const name = config.name || config.key;
+        const entry = { config, component };
+        if (!slotEntries[name]) slotEntries[name] = [];
+        slotEntries[name].push(entry);
+        if (!slots[name]) slots[name] = entry;
         return () => {
-          delete slots[key];
+          const list = slotEntries[name];
+          if (!list) return;
+          const index = list.indexOf(entry);
+          if (index >= 0) list.splice(index, 1);
+          if (slots[name] === entry) slots[name] = list[0];
         };
       },
     },
@@ -776,11 +826,50 @@ export function harness(options = {}) {
 
   let root = react.React.createElement(() => null, {});
 
-  function renderPage() {
+  function renderPage(props) {
     const entry = slots.main;
     if (!entry) throw new Error('main slot was not registered');
-    root = react.React.createElement(entry.component, {});
+    root = react.React.createElement(entry.component, props || {});
     return render();
+  }
+
+  function slotInjectedProps(entry) {
+    const config = entry.config || {};
+    let injected = {};
+    try {
+      if (typeof config.inject === 'function') injected = config.inject() || {};
+    } catch (error) {
+      injected = {};
+    }
+    if (!injected || typeof injected !== 'object') injected = {};
+    const props = Object.assign({}, injected);
+    if (config.locale) props.t = translateFor(language);
+    return props;
+  }
+
+  function findSlotEntry(name, selector) {
+    const list = slotEntries[name] || [];
+    if (selector === undefined || selector === null) return list[0];
+    if (typeof selector === 'number') return list[selector];
+    return (
+      list.find(
+        (entry) =>
+          entry.config &&
+          (entry.config.id === selector || entry.config.key === selector),
+      ) || null
+    );
+  }
+
+  function renderSlot(name, selector, extraProps) {
+    const entry = findSlotEntry(name, selector);
+    if (!entry) throw new Error('slot not registered: ' + name + ' (' + String(selector) + ')');
+    const props = Object.assign(slotInjectedProps(entry), extraProps || {});
+    root = react.React.createElement(entry.component, props);
+    return render();
+  }
+
+  function renderOverlay() {
+    return renderSlot('shell.overlay', 'prompt-library-capture');
   }
 
   function renderQuick(props) {
@@ -872,6 +961,11 @@ export function harness(options = {}) {
     renderPage,
     renderQuick,
     renderSidebarIcon,
+    renderSlot,
+    renderOverlay,
+    slotEntries,
+    interactions,
+    openSessionCalls,
     flush,
     text: (value) => textOf(value === undefined ? renderedTree : value),
     all,

@@ -1,5 +1,6 @@
 /**
- * Composer quick picker — generated/embedded fragment (owner: quick-ui).
+ * Composer quick picker + quick-capture entries — generated/embedded fragment
+ * (owner: quick-ui).
  *
  * The entry button lives in the `conversation.input.right` slot; the picker
  * itself is a shared `Modal` (portalled to `document.body` by `Portal`, as the
@@ -7,6 +8,14 @@
  * the only actions that count as "used"; inserting goes exclusively through
  * the shared `doInsert(inputActions, text)` helper (captureInsertion +
  * insertText, revision checked) and never replaces the whole draft or sends.
+ *
+ * Quick capture (DESIGN.md §9.3) adds three entry points that only ever publish
+ * a synchronous snapshot to the Lead-owned capture hub (`capture.open`):
+ * `PromptLibrarySaveDraftEntry` (composer toolbar, whole draft),
+ * `PromptLibraryMessageCaptureAction` (chat selection overlay) and the quick
+ * picker toolbar entries (empty paste capture / whole draft). They never write
+ * the draft, submit, read the clipboard or touch host DOM; the capture dialog
+ * owns editing, saving, duplicate checks and the "whole draft" degradation copy.
  *
  * Rules for this file (see DESIGN.md §1): plain script in the client factory
  * scope, no import/export statements, only functions and consts, all copy in
@@ -20,11 +29,23 @@ const QUICK_PICKER_CSS = [
   '.plq-entry:hover{background:color-mix(in srgb,var(--dsw-alias-label-secondary) 10%,transparent);color:var(--dsw-alias-label-primary)}',
   '.plq-entry:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}',
   '.plq-entry-label{color:var(--dsw-alias-label-primary)}',
+  '.plq-tip-wrap{display:inline-flex;align-items:center;min-width:0}',
+  '.plq-tip{position:fixed;z-index:10001;max-width:280px;padding:6px 9px;border-radius:8px;background:var(--dsw-alias-toast-bg,color-mix(in srgb,var(--dsw-alias-label-primary) 92%,transparent));color:var(--dsw-alias-toast-label,var(--dsw-alias-bg-base));font-size:12px;line-height:1.45;text-align:left;overflow-wrap:anywhere;box-shadow:0 6px 20px rgba(0,0,0,.2);pointer-events:none}',
+  '.plq-draft-entry{justify-content:center;width:30px;min-height:30px;padding:0}',
+  '.plq-draft-entry:disabled{opacity:.4;cursor:not-allowed}',
+  '.plq-draft-entry[disabled]{opacity:.55;cursor:not-allowed}',
+  '.plq-draft-entry[disabled]:hover{background:transparent;color:var(--dsw-alias-label-secondary)}',
+  '.plq-msg-capture{display:inline-flex;align-items:center;gap:5px;min-height:28px;padding:0 9px;border:.5px solid var(--dsw-alias-border-l1);border-radius:8px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font:inherit;font-size:12.5px;line-height:1;cursor:pointer;white-space:nowrap}',
+  '.plq-msg-capture:hover:not([disabled]){background:var(--dsw-alias-interactive-bg-hover,var(--dsw-alias-bg-layer-2))}',
+  '.plq-msg-capture:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}',
+  '.plq-msg-capture[disabled]{opacity:.55;cursor:not-allowed}',
   '.pl-dialog:has(.plq-shell){width:min(720px,100%)}',
   '.plq-shell{display:flex;flex-direction:column;gap:10px;min-height:0;width:100%;max-width:720px;margin:0 auto}',
-  '.plq-toolbar{display:flex;align-items:center;gap:10px}',
+  '.plq-toolbar{display:flex;align-items:center;flex-wrap:wrap;gap:10px}',
   '.plq-search{flex:1;min-width:0;min-height:32px}',
   '.plq-count{flex:none;font-size:12px;color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums;white-space:nowrap}',
+  '.plq-capture-actions{display:flex;align-items:center;gap:6px;margin-left:auto}',
+  '.plq-capture-btn{flex:none;display:inline-flex;align-items:center;gap:4px;min-height:30px;padding:0 8px;font-size:12.5px}',
   '.plq-strip{display:flex;align-items:center;flex-wrap:wrap;gap:8px 12px;padding:7px 10px;border:.5px solid transparent;border-radius:9px;font-size:12.5px;line-height:1.5}',
   '.plq-strip-info{border-color:var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-secondary)}',
   '.plq-strip-success{border-color:color-mix(in srgb,var(--dsw-alias-state-success-primary,#2f9e44) 40%,transparent);background:color-mix(in srgb,var(--dsw-alias-state-success-primary,#2f9e44) 10%,transparent);color:var(--dsw-alias-state-success-primary,#2f9e44)}',
@@ -64,6 +85,8 @@ const QUICK_PICKER_CSS = [
   '@media (max-width: 640px){',
   '.pl-dialog:has(.plq-shell){width:100%;border-radius:12px}',
   '.plq-shell{max-width:none}',
+  '.plq-toolbar{flex-wrap:wrap}',
+  '.plq-capture-actions{margin-left:0;width:100%;justify-content:flex-end}',
   '.plq-body{grid-template-columns:minmax(0,1fr);gap:10px}',
   '.plq-list{max-height:40vh}',
   '.plq-preview-col{border-left:0;border-top:.5px solid var(--dsw-alias-border-l1);padding-left:0;padding-top:10px}',
@@ -74,7 +97,7 @@ const QUICK_PICKER_CSS = [
 const QUICK_PICKER_DICT = {
   zh: {
     'quick.entry': '提示库',
-    'quick.entryTitle': '打开提示库快捷选择',
+    'quick.entryTitle': '提示库快捷选择：搜索、收藏、置顶与最近使用的提示词，可预览、复制或插入当前输入框',
     'quick.title': '提示库 · 快捷选择',
     'quick.search': '搜索提示词',
     'quick.searchPlaceholder': '搜索标题、正文或标签',
@@ -105,10 +128,21 @@ const QUICK_PICKER_DICT = {
     'quick.ratingLabel': '用后评分',
     'quick.insertDisabled': '当前 DSH 版本未提供安全插入接口，插入已禁用，请改用复制。',
     'quick.storageWarning': '本地存储不可用，本次改动可能无法保存。',
+    'quick.saveDraft': '存草稿',
+    'quick.saveDraftLabel': '保存为提示词',
+    'quick.saveDraftTitle': '把输入框中的整份草稿收录为提示词',
+    'quick.saveDraftEmpty': '输入框为空，暂无可保存的草稿',
+    'quick.saveDraftPanel': '保存草稿为提示词',
+    'quick.captureQuick': '快速收录',
+    'quick.captureQuickTitle': '打开快速收录，手动粘贴文本',
+    'quick.captureBusy': '收录弹层已打开，请先完成或关闭当前收录。',
+    'quick.captureUnavailable': '当前环境未提供快速收录功能。',
+    'quick.captureMessage': '收录为提示词',
+    'quick.captureMessageTitle': '把选中的对话文本收录为提示词',
   },
   en: {
     'quick.entry': 'Prompts',
-    'quick.entryTitle': 'Open the Prompt Library quick picker',
+    'quick.entryTitle': 'Prompt Library quick picker: search favorites, pins and recent prompts, then preview, copy or insert into the draft',
     'quick.title': 'Prompt Library · Quick picker',
     'quick.search': 'Search prompts',
     'quick.searchPlaceholder': 'Search titles, text or tags',
@@ -139,6 +173,17 @@ const QUICK_PICKER_DICT = {
     'quick.ratingLabel': 'Rate after use',
     'quick.insertDisabled': 'This DSH version exposes no safe insertion API, so inserting is disabled — use Copy instead.',
     'quick.storageWarning': 'Local storage is unavailable; changes in this session may not be saved.',
+    'quick.saveDraft': 'Save draft',
+    'quick.saveDraftLabel': 'Save as prompt',
+    'quick.saveDraftTitle': 'Save the whole composer draft as a prompt',
+    'quick.saveDraftEmpty': 'The composer is empty — nothing to save',
+    'quick.saveDraftPanel': 'Save draft as prompt',
+    'quick.captureQuick': 'Quick capture',
+    'quick.captureQuickTitle': 'Open quick capture to paste text manually',
+    'quick.captureBusy': 'A capture dialog is already open — finish or close it first.',
+    'quick.captureUnavailable': 'Quick capture is not available in this environment.',
+    'quick.captureMessage': 'Save as prompt',
+    'quick.captureMessageTitle': 'Save the selected conversation text as a prompt',
   },
 };
 
@@ -380,6 +425,255 @@ function QPPreview(props) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Quick capture entries (DESIGN.md §9.3)                              */
+/* ------------------------------------------------------------------ */
+
+/** Inbox/tray icon used by the capture entries; color comes from currentColor. */
+let QP_TIP_SEQUENCE = 0;
+
+/**
+ * Immediate hover/focus description. Native `title` tooltips wait about a
+ * second before showing, which felt slow in the composer toolbar; this renders
+ * a themed tooltip at once (portalled to the body, because the composer is its
+ * own containing block) and keeps keyboard focus users informed too.
+ */
+function QPHoverTip(props) {
+  const [open, setOpen] = React.useState(false);
+  const [coords, setCoords] = React.useState(null);
+  const wrapRef = React.useRef(null);
+  const tipRef = React.useRef(null);
+  const idRef = React.useRef(null);
+  if (idRef.current === null) {
+    QP_TIP_SEQUENCE += 1;
+    idRef.current = 'plq-tip-' + String(QP_TIP_SEQUENCE);
+  }
+  const label = typeof props.label === 'string' ? props.label : '';
+
+  React.useEffect(() => {
+    if (!open) return undefined;
+    const place = () => {
+      const anchor = wrapRef.current;
+      const tip = tipRef.current;
+      if (!anchor || !tip || typeof anchor.getBoundingClientRect !== 'function') return;
+      const rect = anchor.getBoundingClientRect();
+      const width = tip.offsetWidth || 200;
+      const height = tip.offsetHeight || 32;
+      const viewWidth = typeof window !== 'undefined' && window.innerWidth ? window.innerWidth : 800;
+      let left = rect.left + rect.width / 2 - width / 2;
+      left = Math.max(8, Math.min(left, viewWidth - width - 8));
+      let top = rect.top - height - 6;
+      if (top < 8) top = rect.bottom + 6;
+      setCoords({ left, top });
+    };
+    place();
+    const win = typeof window !== 'undefined' ? window : null;
+    const hide = () => setOpen(false);
+    if (win && typeof win.addEventListener === 'function') {
+      win.addEventListener('resize', hide);
+      win.addEventListener('scroll', hide, true);
+    }
+    return () => {
+      if (win && typeof win.removeEventListener === 'function') {
+        win.removeEventListener('resize', hide);
+        win.removeEventListener('scroll', hide, true);
+      }
+    };
+  }, [open]);
+
+  function show() {
+    if (!label) return;
+    setCoords(null);
+    setOpen(true);
+  }
+  function hide() {
+    setOpen(false);
+  }
+
+  return h(
+    'span',
+    {
+      ref: wrapRef,
+      className: 'plq-tip-wrap',
+      'data-hover-tip': '',
+      onMouseEnter: show,
+      onMouseLeave: hide,
+      onFocus: show,
+      onBlur: hide,
+      onClick: hide,
+    },
+    props.children,
+    open && label
+      ? h(
+          Portal,
+          null,
+          h(
+            'div',
+            {
+              ref: tipRef,
+              id: idRef.current,
+              role: 'tooltip',
+              className: 'plq-tip',
+              style:
+                coords === null
+                  ? { left: 0, top: 0, visibility: 'hidden' }
+                  : { left: String(coords.left) + 'px', top: String(coords.top) + 'px' },
+            },
+            label,
+          ),
+        )
+      : null,
+  );
+}
+
+function QPCaptureIcon(props) {
+  const size = (props && props.size) || 16;
+  return h(
+    'svg',
+    {
+      width: size,
+      height: size,
+      viewBox: '0 0 24 24',
+      fill: 'none',
+      'aria-hidden': 'true',
+      focusable: 'false',
+    },
+    /* A wide, rounded bookmark with a solid plus: conceptually a bookmark (the
+     * user's preference), optically sized and weighted to sit next to the
+     * library book icon without looking thinner or smaller. */
+    h('path', {
+      d: 'M5.3 6a1.8 1.8 0 0 1 1.8-1.8h9.8a1.8 1.8 0 0 1 1.8 1.8v14.4L12 16.6l-6.7 3.8V6Z',
+      stroke: 'currentColor',
+      strokeWidth: 1.7,
+      strokeLinejoin: 'round',
+      fill: 'none',
+    }),
+    h('path', {
+      d: 'M11.15 8.5h1.7v1.65h1.65v1.7h-1.65v1.65h-1.7v-1.65H9.5v-1.7h1.65V8.5Z',
+      fill: 'currentColor',
+      opacity: 0.9,
+    }),
+  );
+}
+
+/**
+ * Second composer entry (`conversation.input.right`, after the picker):
+ * saves the WHOLE composer draft into the capture dialog.
+ *
+ * Rules (DESIGN.md §9.3/§9.4): the draft is only ever read here — never
+ * written, submitted or replaced; there is no safe selection API for the
+ * composer, so only the full draft is offered and the dialog explains the
+ * degradation. `capture` is optional: without it the button stays disabled.
+ */
+function PromptLibrarySaveDraftEntry(props) {
+  const source = props || {};
+  const slotProps = source.slotProps || {};
+  const t = useT(source.locale);
+  const capture = source.capture || null;
+  const captureReady = Boolean(capture && typeof capture.open === 'function');
+  const draft = slotProps.input && typeof slotProps.input.draft === 'string' ? slotProps.input.draft : '';
+  const hasDraft = draft.trim() !== '';
+  const disabled = !captureReady || !hasDraft;
+  const title = !captureReady
+    ? t('quick.captureUnavailable')
+    : hasDraft
+      ? t('quick.saveDraftTitle')
+      : t('quick.saveDraftEmpty');
+
+  function onClick() {
+    if (!captureReady) return;
+    /* Snapshot the whole draft and the session id at click time; never mutate. */
+    const live = source.slotProps && source.slotProps.input ? source.slotProps.input : {};
+    const text = typeof live.draft === 'string' ? live.draft : '';
+    if (text.trim() === '') return;
+    const sessionId = source.slotProps ? source.slotProps.sessionId : undefined;
+    capture.open({ text, source: { kind: 'composer', sessionId } });
+  }
+
+  return h(
+    QPHoverTip,
+    { label: title },
+    h(
+      'button',
+      {
+        type: 'button',
+        className: 'plq-entry plq-draft-entry',
+        'aria-label': t('quick.saveDraftLabel'),
+        disabled,
+        'data-capture-entry': 'composer',
+        onClick,
+      },
+      h(QPCaptureIcon, { size: 17 }),
+    ),
+  );
+}
+
+/**
+ * Selection action rendered by the `conversation.chat.text-interaction`
+ * overlay: hands the selected message text to the capture dialog and closes
+ * the overlay. Only `trigger === 'selection'` is ours; nothing here touches
+ * the host DOM or writes to the conversation.
+ */
+function PromptLibraryMessageCaptureAction(props) {
+  const source = props || {};
+  const fallbackT = useT(source.locale);
+  const t = typeof source.t === 'function' ? source.t : fallbackT;
+  const capture = source.capture || null;
+  const captureReady = Boolean(capture && typeof capture.open === 'function');
+  const trigger = source.trigger;
+
+  function dismiss() {
+    if (typeof source.dismiss === 'function') source.dismiss();
+  }
+
+  function onPointerDown(event) {
+    if (event && typeof event.preventDefault === 'function') event.preventDefault();
+  }
+
+  function onClick() {
+    if (trigger !== 'selection' || !captureReady) {
+      dismiss();
+      return;
+    }
+    let text = null;
+    try {
+      text = typeof source.readText === 'function' ? source.readText() : null;
+    } catch {
+      text = null;
+    }
+    if (typeof text !== 'string' || text.trim() === '') {
+      dismiss();
+      return;
+    }
+    const opened = { text, source: { kind: 'message', sessionId: source.sessionId } };
+    try {
+      capture.open(opened);
+    } finally {
+      dismiss();
+    }
+  }
+
+  /* Other triggers (menu/link/...) are not ours: render nothing at all. */
+  if (trigger !== undefined && trigger !== null && trigger !== 'selection') return null;
+
+  const title = captureReady ? t('quick.captureMessageTitle') : t('quick.captureUnavailable');
+  return h(
+    'button',
+    {
+      type: 'button',
+      className: 'plq-msg-capture',
+      'aria-label': t('quick.captureMessage'),
+      title,
+      disabled: !captureReady,
+      'data-capture-entry': 'message',
+      onPointerDown,
+      onClick,
+    },
+    h(QPCaptureIcon, { size: 14 }),
+    h('span', null, t('quick.captureMessage')),
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /* Main component                                                      */
 /* ------------------------------------------------------------------ */
 
@@ -407,6 +701,13 @@ function PromptLibraryQuickEntry(props) {
   sessionRef.current = sessionId;
 
   const insertAvailable = hasInsertApi(slotProps.inputActions);
+
+  /* Optional Lead-injected capture hub; every entry degrades safely without it. */
+  const capture = (props && props.capture) || null;
+  const captureReady = Boolean(capture && typeof capture.open === 'function');
+  const composerDraft =
+    slotProps.input && typeof slotProps.input.draft === 'string' ? slotProps.input.draft : '';
+  const draftReady = composerDraft.trim() !== '';
 
   /* Switching conversations must never keep a stale overlay or selection. */
   React.useEffect(() => {
@@ -546,24 +847,64 @@ function PromptLibraryQuickEntry(props) {
     showNotice('info', 'quick.openPanelHint');
   }
 
+  /* Open the capture dialog and hand over; the dialog owns all editing/saving.
+   * `capture.open` returns false when a dialog is already open (request kept). */
+  function openCapture(payload) {
+    if (!captureReady) return false;
+    let opened;
+    try {
+      opened = capture.open(payload);
+    } catch {
+      opened = false;
+    }
+    return opened !== false;
+  }
+
+  function handleQuickCapture() {
+    if (!captureReady) return;
+    if (openCapture({ text: '', source: { kind: 'paste' } })) {
+      closePanel();
+      return;
+    }
+    showNotice('info', 'quick.captureBusy');
+  }
+
+  function handleSaveDraftCapture() {
+    if (!captureReady) return;
+    /* Snapshot the whole draft and session id at click time, read-only. */
+    if (composerDraft.trim() === '') return;
+    const payload = {
+      text: composerDraft,
+      source: { kind: 'composer', sessionId: slotProps.sessionId },
+    };
+    if (openCapture(payload)) {
+      closePanel();
+      return;
+    }
+    showNotice('info', 'quick.captureBusy');
+  }
+
   /* -------------------------- entry button -------------------------- */
 
   const entry = h(
     'span',
     { ref: entryRef, className: 'plq-entry-wrap' },
     h(
-      'button',
-      {
-        type: 'button',
-        className: 'plq-entry',
-        'aria-label': t('quick.entry'),
-        title: t('quick.entryTitle'),
-        'aria-haspopup': 'dialog',
-        'aria-expanded': open,
-        onClick: togglePanel,
-      },
-      h(LibraryIcon, { size: 16 }),
-      narrow ? null : h('span', { className: 'plq-entry-label' }, t('quick.entry')),
+      QPHoverTip,
+      { label: t('quick.entryTitle') },
+      h(
+        'button',
+        {
+          type: 'button',
+          className: 'plq-entry',
+          'aria-label': t('quick.entry'),
+          'aria-haspopup': 'dialog',
+          'aria-expanded': open,
+          onClick: togglePanel,
+        },
+        h(LibraryIcon, { size: 16 }),
+        narrow ? null : h('span', { className: 'plq-entry-label' }, t('quick.entry')),
+      ),
     ),
   );
 
@@ -680,6 +1021,38 @@ function PromptLibraryQuickEntry(props) {
               onChange: onSearchChange,
             }),
             total > 0 ? h('span', { className: 'plq-count', role: 'status' }, t('quick.resultCount', { n: total })) : null,
+            captureReady
+              ? h(
+                  'div',
+                  { className: 'plq-capture-actions' },
+                  h(
+                    'button',
+                    {
+                      type: 'button',
+                      className: 'pl-btn pl-btn-ghost plq-capture-btn',
+                      'aria-label': t('quick.captureQuick'),
+                      title: t('quick.captureQuickTitle'),
+                      'data-quick-capture': 'paste',
+                      onClick: handleQuickCapture,
+                    },
+                    h(QPCaptureIcon, { size: 14 }),
+                    h('span', null, t('quick.captureQuick')),
+                  ),
+                  h(
+                    'button',
+                    {
+                      type: 'button',
+                      className: 'pl-btn pl-btn-ghost plq-capture-btn',
+                      'aria-label': t('quick.saveDraftLabel'),
+                      title: draftReady ? t('quick.saveDraftTitle') : t('quick.saveDraftEmpty'),
+                      disabled: !draftReady,
+                      'data-quick-capture': 'composer',
+                      onClick: handleSaveDraftCapture,
+                    },
+                    t('quick.saveDraftPanel'),
+                  ),
+                )
+              : null,
           ),
           snap && snap.status !== 'ready'
             ? h('p', { className: 'plq-hint' }, t('quick.storageWarning'))

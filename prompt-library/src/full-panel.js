@@ -15,12 +15,18 @@
 const FULL_PANEL_DICT = {
   zh: {
     'full.header.subtitle': '本地保存 · 评分 · AI 辅助评价',
+    'full.capture.open': '快速收录',
+    'full.capture.openHint': '打开快速收录：可粘贴正文、补充来源说明并先放进收件箱',
+    'full.capture.unavailable': '快速收录暂不可用：当前面板没有接入收录入口',
+    'full.capture.failed': '快速收录打开失败：{message}',
     'full.aria.nav': '导航与筛选',
     'full.aria.list': '提示词列表',
     'full.aria.detail': '提示词详情',
     'full.aria.exportMenu': '导出菜单',
     'full.nav.title': '导航',
     'full.nav.all': '全部提示词',
+    'full.nav.inboxOption': '收件箱（{count}）',
+    'full.nav.inboxAria': '查看收件箱，{count} 条待整理',
     'full.nav.favorites': '收藏',
     'full.nav.recent': '最近使用',
     'full.nav.quality': '质量筛选',
@@ -45,6 +51,8 @@ const FULL_PANEL_DICT = {
     'full.list.noResults.title': '没有匹配的提示词',
     'full.list.noResults.body': '当前搜索或筛选条件下没有结果，可以清除筛选后再试。',
     'full.list.noSelection': '从列表中选择提示词查看详情',
+    'full.inbox.emptyTitle': '收件箱是空的',
+    'full.inbox.emptyBody': '快速收录的提示词会先进入收件箱；整理完成后在详情里点击“标记整理完成”即可移出。',
     'full.sort.label': '排序',
     'full.sort.default': '默认（置顶优先，最近更新）',
     'full.sort.updated': '最近更新',
@@ -79,6 +87,31 @@ const FULL_PANEL_DICT = {
     'full.detail.share': '分享',
     'full.detail.delete': '删除',
     'full.detail.missing': '提示词不存在或已被删除',
+    'full.focus.notFound': '要查看的提示词不存在或已被删除',
+    'full.organize.title': '整理状态',
+    'full.organize.state.inbox': '待整理',
+    'full.organize.state.organized': '已整理',
+    'full.organize.current': '当前状态：{state}',
+    'full.organize.markDone': '标记整理完成',
+    'full.organize.backToInbox': '重新移回收件箱',
+    'full.organize.hint': '整理状态与评分、标签、收藏相互独立；切换状态不会修改正文，也不会刷新更新时间。',
+    'full.organize.markedDone': '已标记为整理完成',
+    'full.organize.movedBack': '已移回收件箱',
+    'full.organize.unavailable': '当前版本不支持调整整理状态',
+    'full.organize.failed': '整理状态更新失败：{message}',
+    'full.capture.sourceTitle': '来源信息',
+    'full.capture.kindLine': '来源：{kind}',
+    'full.capture.kind.paste': '手动粘贴',
+    'full.capture.kind.composer': '输入框草稿',
+    'full.capture.kind.message': '对话消息',
+    'full.capture.kind.unknown': '未知来源',
+    'full.capture.capturedAt': '收录时间：{value}',
+    'full.capture.note': '来源说明：{note}',
+    'full.capture.openSession': '打开来源会话',
+    'full.capture.sessionOpened': '已打开来源会话',
+    'full.capture.sessionUnavailable': '当前环境不支持打开来源会话',
+    'full.capture.sessionFailed': '打开来源会话失败：{message}',
+    'full.capture.messageHint': '该条收录自对话消息；当前接口不支持定位到原消息，因此不提供跳转。',
     'full.detail.rateAfterUse': '给这条提示词评分',
     'full.detail.rateAfterUseHint': '刚复制过正文，记录你的使用体验（可选）',
     'full.detail.rateLater': '稍后',
@@ -213,11 +246,12 @@ const FULL_PANEL_DICT = {
     'full.import.replaceConfirm': '删除现有数据并导入',
     'full.import.noPlan': '尚未读取到可导入的内容',
     'full.import.fieldTitle': '字段说明',
-    'full.import.fieldCsv': 'CSV 列：title、body、tags、usage、rating、note；也接受中文表头（标题、正文、标签、使用场景、评分、评价备注）。',
+    'full.import.fieldCsv': 'CSV 列：title、body、tags、usage、rating、note、organize、sourceNote；也接受中文表头（标题、正文、标签、使用场景、评分、评价备注、整理状态、来源说明）。',
+    'full.import.fieldOrganize': 'organize 是整理状态（inbox 待整理 / organized 已整理，缺省或非法值按 organized 导入）；sourceNote 是来源说明，导入后作为“手动粘贴”来源的收录说明。CSV 不导出会话 ID，JSON 完整备份会保留全部来源元数据。',
     'full.import.fieldTags': '多标签用 JSON 数组编码，例如 ["写作","营销"]；正文与标签中的换行、引号按 RFC 4180 转义。',
     'full.import.fieldRating': '评分范围 1~5，支持 0.5 步进；留空表示未评分。CSV 导入的评分会先标记为“待复评”，因为无法恢复正文版本关联。',
     'full.import.fieldFormula': '导出时对以 = + - @ 开头的内容加前导单引号防止表格公式注入，导入时会自动还原；CSV 往返保留多行与引号。',
-    'full.import.fieldRoundtrip': 'CSV 用于交换；JSON 用于完整备份，保留评分与 AI 评价的正文版本关联。',
+    'full.import.fieldRoundtrip': 'CSV 用于交换；JSON 用于完整备份，保留评分与 AI 评价的正文版本关联，以及整理状态和来源元数据。',
     'full.share.title': '分享提示词',
     'full.share.hint': '分享内容只包含标题与正文，不包含个人评分备注或 AI 评价。',
     'full.share.copy': '复制正文',
@@ -240,12 +274,18 @@ const FULL_PANEL_DICT = {
   },
   en: {
     'full.header.subtitle': 'Local-first · ratings · AI-assisted review',
+    'full.capture.open': 'Quick capture',
+    'full.capture.openHint': 'Open quick capture: paste text, add a source note and save it to the inbox first',
+    'full.capture.unavailable': 'Quick capture is unavailable: this panel has no capture entry wired up',
+    'full.capture.failed': 'Opening quick capture failed: {message}',
     'full.aria.nav': 'Navigation and filters',
     'full.aria.list': 'Prompt list',
     'full.aria.detail': 'Prompt details',
     'full.aria.exportMenu': 'Export menu',
     'full.nav.title': 'Navigate',
     'full.nav.all': 'All prompts',
+    'full.nav.inboxOption': 'Inbox ({count})',
+    'full.nav.inboxAria': 'Show inbox, {count} to organize',
     'full.nav.favorites': 'Favorites',
     'full.nav.recent': 'Recently used',
     'full.nav.quality': 'Quality filter',
@@ -270,6 +310,8 @@ const FULL_PANEL_DICT = {
     'full.list.noResults.title': 'No matching prompts',
     'full.list.noResults.body': 'Nothing matches the current search or filters. Clear the filters and try again.',
     'full.list.noSelection': 'Select a prompt on the left to see its details',
+    'full.inbox.emptyTitle': 'The inbox is empty',
+    'full.inbox.emptyBody': 'Quick-captured prompts land in the inbox first. When you are done organizing one, choose "Mark as organized" in its details to move it out.',
     'full.sort.label': 'Sort',
     'full.sort.default': 'Default (pinned first, recently updated)',
     'full.sort.updated': 'Recently updated',
@@ -304,6 +346,31 @@ const FULL_PANEL_DICT = {
     'full.detail.share': 'Share',
     'full.detail.delete': 'Delete',
     'full.detail.missing': 'This prompt no longer exists',
+    'full.focus.notFound': 'The prompt to show no longer exists',
+    'full.organize.title': 'Organization',
+    'full.organize.state.inbox': 'To organize',
+    'full.organize.state.organized': 'Organized',
+    'full.organize.current': 'Current status: {state}',
+    'full.organize.markDone': 'Mark as organized',
+    'full.organize.backToInbox': 'Move back to inbox',
+    'full.organize.hint': 'Organization is independent of ratings, tags and favorites; switching it never changes the prompt text or its update time.',
+    'full.organize.markedDone': 'Marked as organized',
+    'full.organize.movedBack': 'Moved back to inbox',
+    'full.organize.unavailable': 'Changing the organization status is not available here',
+    'full.organize.failed': 'Updating the organization status failed: {message}',
+    'full.capture.sourceTitle': 'Source',
+    'full.capture.kindLine': 'Source: {kind}',
+    'full.capture.kind.paste': 'Manual paste',
+    'full.capture.kind.composer': 'Composer draft',
+    'full.capture.kind.message': 'Chat message',
+    'full.capture.kind.unknown': 'Unknown source',
+    'full.capture.capturedAt': 'Captured at: {value}',
+    'full.capture.note': 'Source note: {note}',
+    'full.capture.openSession': 'Open source session',
+    'full.capture.sessionOpened': 'Source session opened',
+    'full.capture.sessionUnavailable': 'Opening the source session is not available here',
+    'full.capture.sessionFailed': 'Opening the source session failed: {message}',
+    'full.capture.messageHint': 'Captured from a chat message; the current interface does not support locating the exact message, so no link is offered.',
     'full.detail.rateAfterUse': 'Rate this prompt',
     'full.detail.rateAfterUseHint': 'You just copied the text. Rate your experience (optional).',
     'full.detail.rateLater': 'Later',
@@ -438,11 +505,12 @@ const FULL_PANEL_DICT = {
     'full.import.replaceConfirm': 'Delete current data and import',
     'full.import.noPlan': 'No importable content has been read yet',
     'full.import.fieldTitle': 'Field guide',
-    'full.import.fieldCsv': 'CSV columns: title, body, tags, usage, rating, note; Chinese headers (标题/正文/标签/使用场景/评分/评价备注) are accepted too.',
+    'full.import.fieldCsv': 'CSV columns: title, body, tags, usage, rating, note, organize, sourceNote; Chinese headers (标题/正文/标签/使用场景/评分/评价备注/整理状态/来源说明) are accepted too.',
+    'full.import.fieldOrganize': 'organize is the organization status (inbox = to organize, organized = done; missing or invalid values import as organized); sourceNote is the source note, imported as the note of a "manual paste" source. CSV does not export session ids, while a full JSON backup keeps all source metadata.',
     'full.import.fieldTags': 'Multiple tags are encoded as a JSON array, e.g. ["writing","marketing"]; line breaks and quotes follow RFC 4180 escaping.',
     'full.import.fieldRating': 'Rating is 1 to 5 in steps of 0.5; leave empty for unrated. CSV ratings start as needs-re-rating because the body-version link cannot be restored.',
     'full.import.fieldFormula': 'Exports prefix values starting with = + - @ to prevent spreadsheet formula injection, and imports strip it again; CSV round-trips keep line breaks and quotes.',
-    'full.import.fieldRoundtrip': 'CSV is for exchange; JSON is the full backup that keeps rating and AI review version links.',
+    'full.import.fieldRoundtrip': 'CSV is for exchange; JSON is the full backup that keeps rating and AI review version links, plus organization and source metadata.',
     'full.share.title': 'Share prompt',
     'full.share.hint': 'Shared content contains only the title and prompt text, without the personal note or AI review.',
     'full.share.copy': 'Copy text',
@@ -563,6 +631,16 @@ const FULL_PANEL_CSS = [
   '.pl-file-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}',
   '.pl-share-actions{display:flex;flex-direction:column;gap:8px;margin:12px 0 0}',
   '.pl-share-actions .pl-btn{justify-content:flex-start}',
+  '.pl-badge{flex:none;display:inline-flex;align-items:center;padding:1px 7px;border-radius:999px;font-size:11px;line-height:1.65;font-weight:600;white-space:nowrap}',
+  '.pl-badge-inbox{background:color-mix(in srgb,var(--dsw-alias-state-warn-primary) 15%,transparent);color:var(--dsw-alias-state-warn-primary)}',
+  '.pl-list-item-head .pl-badge{margin-left:auto}',
+  '.pl-detail-head .pl-badge{margin-top:3px}',
+  '.pl-organize-state{flex:none;font-size:12px;font-weight:600;color:var(--dsw-alias-label-secondary)}',
+  '.pl-organize-state-inbox{color:var(--dsw-alias-state-warn-primary)}',
+  '.pl-capture-meta{margin:0 0 8px;font-size:12.5px;line-height:1.65;color:var(--dsw-alias-label-primary);overflow-wrap:anywhere}',
+  '.pl-capture-note{margin:0 0 8px;font-size:12px;line-height:1.65;color:var(--dsw-alias-label-secondary);white-space:pre-wrap;overflow-wrap:anywhere}',
+  '.pl-capture-actions{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin:10px 0 0}',
+  '.pl-capture-hint{margin:8px 0 0;font-size:11.5px;line-height:1.55;color:var(--dsw-alias-label-secondary)}',
 ].join('');
 
 const FP_AI_TIMEOUT_MS = 120000;
@@ -629,6 +707,21 @@ function fpDescribe(t, error) {
   return describeError(t, error);
 }
 
+/** Human-readable message for a thrown value / rejected promise. */
+function fpErrorText(error) {
+  if (error && typeof error.message === 'string' && error.message) return error.message;
+  if (typeof error === 'string' && error) return error;
+  return String(error === undefined || error === null ? '' : error) || 'unknown';
+}
+
+/** Translate a capture source kind, falling back for corrupted/unknown data. */
+function fpCaptureKindText(t, kind) {
+  const key = 'full.capture.kind.' + String(kind || '');
+  const text = t(key);
+  if (typeof text === 'string' && text !== key) return text;
+  return t('full.capture.kind.unknown');
+}
+
 /* ------------------------------------------------------------------ */
 /* Reusable bits                                                       */
 /* ------------------------------------------------------------------ */
@@ -674,15 +767,16 @@ function FPEmptyState(props) {
 /* ------------------------------------------------------------------ */
 
 function FPNav(props) {
-  const { t, data, view, quality, tagId, onView, onQuality, onTag, onManageTags } = props;
+  const { t, data, view, quality, tagId, inboxCount, onView, onQuality, onTag, onManageTags } = props;
   const tags = sortTags(data.tags);
-  const viewItem = (key, label) =>
+  const viewItem = (key, label, ariaLabel) =>
     h(
       'button',
       {
         type: 'button',
         className: 'pl-nav-item',
         'aria-pressed': view === key,
+        'aria-label': ariaLabel,
         onClick: () => onView(key),
       },
       h('span', { className: 'pl-nav-item-text' }, label),
@@ -724,6 +818,11 @@ function FPNav(props) {
       { className: 'pl-nav-group' },
       h('h2', { className: 'pl-nav-heading' }, t('full.nav.title')),
       viewItem('all', t('full.nav.all')),
+      viewItem(
+        'inbox',
+        t('full.nav.inboxOption', { count: inboxCount }),
+        t('full.nav.inboxAria', { count: inboxCount }),
+      ),
       viewItem('favorites', t('full.nav.favorites')),
       viewItem('recent', t('full.nav.recent')),
     ),
@@ -798,6 +897,9 @@ function FPPromptListItem(props) {
           )
         : null,
       h('span', { className: 'pl-list-title' }, prompt.title),
+      prompt.organize === 'inbox'
+        ? h('span', { className: 'pl-badge pl-badge-inbox' }, t('full.organize.state.inbox'))
+        : null,
     ),
     h(
       'span',
@@ -819,7 +921,9 @@ function FPPromptList(props) {
     t,
     data,
     prompts,
+    view,
     hasFilters,
+    hasExtraFilters,
     search,
     sort,
     selectedId,
@@ -852,11 +956,12 @@ function FPPromptList(props) {
       ),
     );
   } else if (prompts.length === 0) {
+    const inboxEmpty = view === 'inbox' && !hasExtraFilters;
     child.push(
       h(FPEmptyState, {
-        key: 'no-results',
-        title: t('full.list.noResults.title'),
-        body: t('full.list.noResults.body'),
+        key: inboxEmpty ? 'inbox-empty' : 'no-results',
+        title: t(inboxEmpty ? 'full.inbox.emptyTitle' : 'full.list.noResults.title'),
+        body: t(inboxEmpty ? 'full.inbox.emptyBody' : 'full.list.noResults.body'),
         actions: hasFilters
           ? [
               h(
@@ -1254,16 +1359,40 @@ function FPAiSection(props) {
 /* ------------------------------------------------------------------ */
 
 function FPDetail(props) {
-  const { t, locale, data, prompt, store, narrow, onBack, onEdit, onDelete, onShare, aiStatus, onRetryStatus } = props;
+  const {
+    t,
+    locale,
+    data,
+    prompt,
+    store,
+    narrow,
+    openSession,
+    onBack,
+    onEdit,
+    onDelete,
+    onShare,
+    aiStatus,
+    onRetryStatus,
+  } = props;
   const [rateAfterUse, setRateAfterUse] = React.useState(false);
   const [copyNotice, setCopyNotice] = React.useState(null);
   const [aiDeleteOpen, setAiDeleteOpen] = React.useState(false);
+  const [organizeNotice, setOrganizeNotice] = React.useState(null);
+  const [sourceNotice, setSourceNotice] = React.useState(null);
   const [bodyMode, setBodyMode] = useBodyRenderMode(store);
   const tags = tagsForPrompt(data, prompt);
   const localeId = fpActiveLocale(locale);
   const created = formatDateTime(prompt.createdAt, localeId);
   const updated = formatDateTime(prompt.updatedAt, localeId);
   const lastUsed = formatDateTime(prompt.lastUsedAt, localeId);
+  const inInbox = prompt.organize === 'inbox';
+  const organizeStateLabel = t(inInbox ? 'full.organize.state.inbox' : 'full.organize.state.organized');
+  const capture = prompt.capture && typeof prompt.capture === 'object' ? prompt.capture : null;
+  const captureKindLabel = capture ? fpCaptureKindText(t, capture.kind) : '';
+  const capturedAtText = capture ? formatDateTime(capture.at, localeId) : '';
+  const captureNote = capture && typeof capture.note === 'string' ? capture.note.trim() : '';
+  const captureSessionId = capture && typeof capture.sessionId === 'string' ? capture.sessionId : '';
+  const captureMessageId = capture && typeof capture.messageId === 'string' ? capture.messageId : '';
   const metaParts = [];
   if (created) metaParts.push(t('full.detail.created', { value: created }));
   if (updated) metaParts.push(t('full.detail.updated', { value: updated }));
@@ -1285,6 +1414,97 @@ function FPDetail(props) {
     store.setRating(prompt.id, stars);
     setRateAfterUse(false);
     setCopyNotice({ kind: 'success', text: t('full.rating.current') });
+  }
+
+  /* Organization status is independent metadata; store.setOrganize must keep
+   * updatedAt untouched. Guard for older store builds and show failures in
+   * place instead of touching the body. */
+  function changeOrganize() {
+    const next = inInbox ? 'organized' : 'inbox';
+    let result = null;
+    try {
+      if (typeof store.setOrganize === 'function') result = store.setOrganize(prompt.id, next);
+    } catch (error) {
+      setOrganizeNotice({
+        kind: 'error',
+        text: t('full.organize.failed', { message: fpErrorText(error) }),
+      });
+      return;
+    }
+    if (!result) {
+      setOrganizeNotice({ kind: 'error', text: t('full.organize.unavailable') });
+      return;
+    }
+    if (!result.ok) {
+      setOrganizeNotice({
+        kind: 'error',
+        text: t('full.organize.failed', { message: fpDescribe(t, result.error) }),
+      });
+      return;
+    }
+    setOrganizeNotice({
+      kind: 'success',
+      text: t(next === 'organized' ? 'full.organize.markedDone' : 'full.organize.movedBack'),
+    });
+  }
+
+  /* Source session jump is optional host plumbing: any failure is reported in
+   * place and never affects the prompt itself. */
+  function openSourceSession() {
+    if (!captureSessionId) return;
+    if (typeof openSession !== 'function') {
+      setSourceNotice({ kind: 'error', text: t('full.capture.sessionUnavailable') });
+      return;
+    }
+    let result;
+    try {
+      result = openSession(captureSessionId);
+    } catch (error) {
+      const message = fpErrorText(error);
+      setSourceNotice({
+        kind: 'error',
+        text:
+          message === 'navigation-unavailable'
+            ? t('full.capture.sessionUnavailable')
+            : t('full.capture.sessionFailed', { message }),
+      });
+      return;
+    }
+    if (result && typeof result.then === 'function') {
+      result.then(
+        (value) => {
+          if (value === false) {
+            setSourceNotice({ kind: 'error', text: t('full.capture.sessionUnavailable') });
+          } else if (value && value.ok === false) {
+            setSourceNotice({
+              kind: 'error',
+              text: t('full.capture.sessionFailed', { message: fpDescribe(t, value.error) }),
+            });
+          } else {
+            setSourceNotice({ kind: 'success', text: t('full.capture.sessionOpened') });
+          }
+        },
+        (error) => {
+          setSourceNotice({
+            kind: 'error',
+            text: t('full.capture.sessionFailed', { message: fpErrorText(error) }),
+          });
+        },
+      );
+      return;
+    }
+    if (result === false) {
+      setSourceNotice({ kind: 'error', text: t('full.capture.sessionUnavailable') });
+      return;
+    }
+    if (result && result.ok === false) {
+      setSourceNotice({
+        kind: 'error',
+        text: t('full.capture.sessionFailed', { message: fpDescribe(t, result.error) }),
+      });
+      return;
+    }
+    setSourceNotice({ kind: 'success', text: t('full.capture.sessionOpened') });
   }
 
   function aiGenerated(review, meta) {
@@ -1322,6 +1542,9 @@ function FPDetail(props) {
       'div',
       { className: 'pl-detail-head' },
       h('h2', { className: 'pl-detail-title' }, prompt.title),
+      inInbox
+        ? h('span', { className: 'pl-badge pl-badge-inbox' }, t('full.organize.state.inbox'))
+        : null,
       h(
         'div',
         { className: 'pl-detail-actions' },
@@ -1364,6 +1587,74 @@ function FPDetail(props) {
         ? h(TagChips, { tags, limit: 20 })
         : h('span', { className: 'pl-muted' }, t('full.detail.noTags')),
     ),
+    h(
+      'div',
+      { className: 'pl-detail-section' },
+      h(
+        'div',
+        { className: 'pl-section-head' },
+        h('h3', { className: 'pl-section-title pl-section-title-inline' }, t('full.organize.title')),
+        h(
+          'span',
+          { className: 'pl-organize-state' + (inInbox ? ' pl-organize-state-inbox' : '') },
+          t('full.organize.current', { state: organizeStateLabel }),
+        ),
+      ),
+      h('p', { className: 'pl-field-hint' }, t('full.organize.hint')),
+      h(
+        'div',
+        { className: 'pl-inline' },
+        h(
+          'button',
+          { type: 'button', className: 'pl-btn', onClick: changeOrganize },
+          t(inInbox ? 'full.organize.markDone' : 'full.organize.backToInbox'),
+        ),
+      ),
+      organizeNotice
+        ? h(FPLocalNotice, {
+            kind: organizeNotice.kind,
+            text: organizeNotice.text,
+            onDismiss: () => setOrganizeNotice(null),
+            dismissLabel: t('common.dismiss'),
+          })
+        : null,
+    ),
+    capture
+      ? h(
+          'div',
+          { className: 'pl-detail-section' },
+          h('h3', { className: 'pl-section-title' }, t('full.capture.sourceTitle')),
+          h('p', { className: 'pl-capture-meta' }, t('full.capture.kindLine', { kind: captureKindLabel })),
+          capturedAtText
+            ? h('p', { className: 'pl-capture-meta' }, t('full.capture.capturedAt', { value: capturedAtText }))
+            : null,
+          captureNote
+            ? h('p', { className: 'pl-capture-note' }, t('full.capture.note', { note: captureNote }))
+            : null,
+          captureSessionId
+            ? h(
+                'div',
+                { className: 'pl-capture-actions' },
+                h(
+                  'button',
+                  { type: 'button', className: 'pl-btn', onClick: openSourceSession },
+                  t('full.capture.openSession'),
+                ),
+              )
+            : null,
+          captureMessageId
+            ? h('p', { className: 'pl-capture-hint' }, t('full.capture.messageHint'))
+            : null,
+          sourceNotice
+            ? h(FPLocalNotice, {
+                kind: sourceNotice.kind,
+                text: sourceNotice.text,
+                onDismiss: () => setSourceNotice(null),
+                dismissLabel: t('common.dismiss'),
+              })
+            : null,
+        )
+      : null,
     copyNotice
       ? h(FPLocalNotice, {
           kind: copyNotice.kind,
@@ -2157,6 +2448,7 @@ function FPImportModal(props) {
         { className: 'pl-import-guide' },
         h('h4', { className: 'pl-import-guide-title' }, t('full.import.fieldTitle')),
         h('p', null, t('full.import.fieldCsv')),
+        h('p', null, t('full.import.fieldOrganize')),
         h('p', null, t('full.import.fieldTags')),
         h('p', null, t('full.import.fieldRating')),
         h('p', null, t('full.import.fieldFormula')),
@@ -2269,6 +2561,28 @@ function FullPanel(props) {
   const data = snap.data;
   const rootRef = React.useRef(null);
   const narrow = useNarrow(rootRef);
+  /* Optional host plumbing: quick-capture entry, focus requests raised by the
+   * capture dialog's "view" action, and source-session jumps. All nullable. */
+  const capture = props.capture && typeof props.capture.open === 'function' ? props.capture : null;
+  const openSession = typeof props.openSession === 'function' ? props.openSession : null;
+  const focus =
+    props.focus && typeof props.focus.getSnapshot === 'function' && typeof props.focus.subscribe === 'function'
+      ? props.focus
+      : null;
+  const subscribeFocus = React.useCallback(
+    (onChange) => (focus ? focus.subscribe(onChange) : () => {}),
+    [focus],
+  );
+  const readFocus = React.useCallback(() => (focus ? focus.getSnapshot() : null), [focus]);
+  const focusSnapshot = React.useSyncExternalStore(subscribeFocus, readFocus);
+  /* Accept both documented shapes: a bare prompt id, or {id, seq} (Lead's
+   * versioned request store). Anything else means "no request". */
+  const focusRequestId =
+    typeof focusSnapshot === 'string'
+      ? focusSnapshot
+      : focusSnapshot && typeof focusSnapshot.id === 'string'
+        ? focusSnapshot.id
+        : null;
   const initialPrefsRef = React.useRef(undefined);
   if (initialPrefsRef.current === undefined) initialPrefsRef.current = fpReadUiPrefs(store);
   const initialPrefs = initialPrefsRef.current || {};
@@ -2304,6 +2618,27 @@ function FullPanel(props) {
   React.useEffect(() => {
     if (tagId && !data.tags.some((tag) => tag.id === tagId)) setTagId(null);
   }, [tagId, data.tags]);
+
+  /* A capture "view" action asks the panel to reveal a prompt: consume the
+   * request, switch back to "all prompts", clear every filter and select it.
+   * Subscription cleanup is owned by useSyncExternalStore on unmount. */
+  React.useEffect(() => {
+    if (!focusRequestId) return;
+    if (focus && typeof focus.consume === 'function') {
+      try {
+        focus.consume();
+      } catch {
+        /* older focus stores: ignore */
+      }
+    }
+    setView('all');
+    setTagId(null);
+    setQuality('any');
+    setSearch('');
+    setSelectedId(focusRequestId);
+    const exists = data.prompts.some((prompt) => prompt.id === focusRequestId);
+    setFlash(exists ? null : { kind: 'error', text: t('full.focus.notFound') });
+  }, [focusRequestId]);
 
   /* AI service status is fetched once per panel mount and retried on demand. */
   const aiStatusSeq = React.useRef(0);
@@ -2380,7 +2715,9 @@ function FullPanel(props) {
 
   const selectedPrompt = selectedId ? data.prompts.find((prompt) => prompt.id === selectedId) || null : null;
   const prompts = selectPrompts(data, { view, tagId, quality, search }, sort);
+  const inboxCount = selectPrompts(data, { view: 'inbox' }, 'default').length;
   const hasFilters = view !== 'all' || Boolean(tagId) || quality !== 'any' || search.trim() !== '';
+  const hasExtraFilters = Boolean(tagId) || quality !== 'any' || search.trim() !== '';
   const tags = sortTags(data.tags);
   const sharePrompt = shareTarget ? data.prompts.find((prompt) => prompt.id === shareTarget) || null : null;
   const deletePromptObj = deleteTarget ? data.prompts.find((prompt) => prompt.id === deleteTarget) || null : null;
@@ -2390,6 +2727,15 @@ function FullPanel(props) {
     setTagId(null);
     setQuality('any');
     setSearch('');
+  }
+
+  function openCapture() {
+    if (!capture) return;
+    try {
+      capture.open({ text: '', source: { kind: 'paste' } });
+    } catch (error) {
+      setFlash({ kind: 'error', text: t('full.capture.failed', { message: fpErrorText(error) }) });
+    }
   }
 
   function openEditor(promptId) {
@@ -2512,6 +2858,18 @@ function FullPanel(props) {
       { className: 'pl-header-actions' },
       h(
         'button',
+        {
+          type: 'button',
+          className: 'pl-btn',
+          disabled: !capture,
+          title: capture ? t('full.capture.openHint') : t('full.capture.unavailable'),
+          'aria-disabled': capture ? undefined : 'true',
+          onClick: openCapture,
+        },
+        t('full.capture.open'),
+      ),
+      h(
+        'button',
         { type: 'button', className: 'pl-btn pl-btn-primary', onClick: () => openEditor(null) },
         t('full.list.new'),
       ),
@@ -2565,6 +2923,7 @@ function FullPanel(props) {
     view,
     quality,
     tagId,
+    inboxCount,
     onView: setView,
     onQuality: setQuality,
     onTag: setTagId,
@@ -2575,7 +2934,9 @@ function FullPanel(props) {
     t,
     data,
     prompts,
+    view,
     hasFilters,
+    hasExtraFilters,
     search,
     sort,
     selectedId,
@@ -2595,6 +2956,7 @@ function FullPanel(props) {
         prompt: selectedPrompt,
         store,
         narrow,
+        openSession,
         aiStatus,
         onRetryStatus: reloadAiStatus,
         onBack: () => setSelectedId(null),

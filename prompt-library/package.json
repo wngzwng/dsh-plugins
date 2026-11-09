@@ -20,6 +20,7 @@
     "core.js",
     "client.js",
     "build-client.mjs",
+    "src/capture.js",
     "src/full-panel.js",
     "src/quick-picker.js",
     "cordis.patch.yml",

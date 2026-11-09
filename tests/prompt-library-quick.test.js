@@ -5,6 +5,13 @@
  * `client.js` through the shared harness: entry button a11y, quick-access
  * sections, search, preview, copy/insert semantics, after-use rating,
  * session-switch safety, empty/no-result states and zh/en parity.
+ *
+ * Quick-capture entries (DESIGN.md §9.3): the composer `存草稿` entry, the
+ * conversation-selection `收录为提示词` action, and the quick-picker toolbar
+ * entries. Those components run in real slot registrations, so the tests use
+ * `h.renderSlot(...)` and inspect the shared capture hub exactly as the
+ * overlay does; entry components never mutate the draft, submit or use the
+ * clipboard.
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -132,6 +139,33 @@ function rowById(h, id) {
   return rows(h).find((node) => node.props['data-prompt-id'] === id);
 }
 
+function hoverTipWrappers(h) {
+  return h.all('span').filter((node) => node.props && node.props['data-hover-tip'] !== undefined);
+}
+
+/** Hover the given tooltip wrapper and return the rendered tooltip text. */
+function hoverTipAt(h, index) {
+  const wrappers = hoverTipWrappers(h);
+  const wrapper = wrappers[index === undefined ? 0 : index];
+  assert.ok(wrapper, 'hover-tip wrapper exists');
+  wrapper.props.onMouseEnter({ type: 'mouseenter' });
+  h.render();
+  const tooltip = h.all('div').find((node) => node.props && node.props.role === 'tooltip');
+  assert.ok(tooltip, 'tooltip is rendered immediately on hover');
+  return { wrapper, tooltip, text: h.text(tooltip) };
+}
+
+/** Leaving the anchor removes the tooltip again. */
+function leaveTip(h, wrapper) {
+  wrapper.props.onMouseLeave({ type: 'mouseleave' });
+  h.render();
+  assert.equal(
+    h.all('div').some((node) => node.props && node.props.role === 'tooltip'),
+    false,
+    'tooltip hides on mouse leave',
+  );
+}
+
 function openPanel(h) {
   const entry = entryButton(h);
   assert.ok(entry, 'quick entry button exists');
@@ -189,8 +223,11 @@ test('entry button: dialog a11y attributes, label, and no draft mutation', () =>
   assert.ok(entry, 'entry button is rendered in conversation.input.right');
   assert.equal(entry.props.type, 'button');
   assert.equal(entry.props['aria-label'], '提示库');
-  assert.ok(entry.props.title && entry.props.title.length > 0, 'entry has a title tooltip');
   assert.equal(entry.props['aria-expanded'], false);
+
+  const hovered = hoverTipAt(h, 0);
+  assert.match(hovered.text, /提示库快捷选择|quick picker/i, 'entry hover description is immediate');
+  leaveTip(h, hovered.wrapper);
 
   openPanel(h);
   assert.equal(Boolean(entryButton(h).props['aria-expanded']), true, 'expanded after opening');
@@ -625,8 +662,10 @@ test('narrow composer keeps an icon-only entry with an accessible label', () => 
   h.renderQuick();
   const entry = entryButton(h);
   assert.equal(entry.props['aria-label'], '提示库');
-  assert.ok(entry.props.title);
   assert.equal(h.text(entry).trim(), '', 'label text hidden on narrow widths');
+  const hovered = hoverTipAt(h, 0);
+  assert.match(hovered.text, /提示库快捷选择/, 'hover description remains the only explanation');
+  leaveTip(h, hovered.wrapper);
   h.dispose();
 });
 
@@ -637,4 +676,398 @@ test('QUICK_PICKER_CSS provides the mobile layout and theme tokens', () => {
   assert.ok(source.includes('--dsw-alias-'), 'theme tokens only');
   assert.ok(source.includes('.plq-preview-body'), 'preview text area styles');
   assert.ok(source.includes('.plq-row'), 'list row styles');
+  assert.ok(source.includes('.plq-capture-actions'), 'panel capture action styles');
+  assert.ok(source.includes('.plq-msg-capture'), 'selection capture action styles');
+  assert.ok(source.includes('.plq-draft-entry'), 'composer save-draft entry styles');
+});
+
+/* ------------------------------------------------------------------ */
+/* Quick-capture fixtures (DESIGN.md §9)                               */
+/* ------------------------------------------------------------------ */
+
+/* Multi-line draft with leading/trailing whitespace: the whole string must be
+ * handed over verbatim ("整份草稿"), not trimmed or split. */
+const CAPTURE_DRAFT = '\n  第一行草稿  \n第二行：保留换行与空格  \n';
+
+function captureHub(h) {
+  const entries = (h.slotEntries && h.slotEntries['shell.overlay']) || [];
+  const entry = entries.find(
+    (item) => item.config && item.config.id === 'prompt-library-capture',
+  );
+  assert.ok(entry, 'capture host is registered in shell.overlay');
+  assert.equal(typeof entry.config.inject, 'function', 'capture host injects the shared hub');
+  const injected = entry.config.inject() || {};
+  assert.equal(typeof injected.capture.getSnapshot, 'function', 'capture hub exposes snapshots');
+  return injected.capture;
+}
+
+function fakeCapture(options = {}) {
+  const calls = [];
+  return {
+    calls,
+    open(payload) {
+      calls.push(payload);
+      return options.result === false ? false : true;
+    },
+  };
+}
+
+function renderSaveDraft(h, slotProps) {
+  return h.renderSlot('conversation.input.right', 'prompt-library-save-draft', slotProps);
+}
+
+function renderSelectionAction(h, props) {
+  return h.renderSlot('conversation.chat.text-interaction', 'prompt-library-capture', props);
+}
+
+/* ------------------------------------------------------------------ */
+/* 11. Composer "save draft" capture entry                             */
+/* ------------------------------------------------------------------ */
+
+test('save-draft entry: button a11y + whole-draft snapshot and no composer mutation', () => {
+  const h = makeHarness();
+  const hub = captureHub(h);
+  renderSaveDraft(h, {
+    sessionId: 'session-1',
+    input: { draft: CAPTURE_DRAFT },
+    inputActions: h.fakeInputActions,
+  });
+
+  const button = h.buttonByLabel('保存为提示词');
+  assert.ok(button, 'save-draft button renders in the composer toolbar');
+  assert.equal(button.props.type, 'button');
+  assert.equal(button.props['aria-label'], '保存为提示词');
+  assert.equal(button.props.disabled, false);
+  assert.ok(
+    h.descendants(button, (node) => node.type === 'svg').length > 0,
+    'compact icon is rendered',
+  );
+  assert.equal(h.text(button).trim(), '', 'the composer entry is icon-only; hover carries the explanation');
+  const hovered = hoverTipAt(h, 0);
+  assert.equal(hovered.text, '把输入框中的整份草稿收录为提示词', 'hover explanation names the action');
+  leaveTip(h, hovered.wrapper);
+
+  const before = h.storage.map.get(DATA_KEY);
+  h.clickButton('保存为提示词');
+
+  const request = hub.getSnapshot().request;
+  assert.ok(request, 'capture dialog received the request');
+  assert.equal(request.text, CAPTURE_DRAFT, 'the WHOLE draft is captured verbatim');
+  assert.equal(request.source.kind, 'composer');
+  assert.equal(request.source.sessionId, 'session-1');
+  assert.deepEqual(h.calls.drafts, [], 'never calls setDraft');
+  assert.deepEqual(h.calls.inserts, [], 'never inserts or submits');
+  assert.deepEqual(h.calls.copies, [], 'never reads the clipboard');
+  assert.equal(h.storage.map.get(DATA_KEY), before, 'library data unchanged');
+  hub.close();
+  h.dispose();
+});
+
+test('save-draft entry: empty or whitespace-only drafts are disabled with a reason', () => {
+  const h = makeHarness();
+  const hub = captureHub(h);
+  renderSaveDraft(h, {
+    sessionId: 'session-1',
+    input: { draft: '   \n\t  ' },
+    inputActions: h.fakeInputActions,
+  });
+
+  const button = h.buttonByLabel('保存为提示词');
+  assert.ok(button, 'button still renders so the action is discoverable');
+  assert.equal(button.props.disabled, true);
+  const hovered = hoverTipAt(h, 0);
+  assert.equal(hovered.text, '输入框为空，暂无可保存的草稿', 'disabled reason appears on hover');
+  leaveTip(h, hovered.wrapper);
+
+  h.clickButton('保存为提示词');
+  assert.equal(hub.getSnapshot().request, null, 'disabled button never opens capture');
+  assert.deepEqual(h.calls.drafts, []);
+  h.dispose();
+});
+
+test('save-draft entry: click-time session snapshot survives a conversation switch', () => {
+  const h = makeHarness();
+  const hub = captureHub(h);
+
+  renderSaveDraft(h, { sessionId: 'session-1', input: { draft: '草稿一' } });
+  h.clickButton('保存为提示词');
+  const first = hub.getSnapshot().request;
+  assert.equal(first.text, '草稿一');
+  assert.equal(first.source.sessionId, 'session-1');
+
+  renderSaveDraft(h, { sessionId: 'session-2', input: { draft: '草稿二' } });
+  assert.equal(hub.getSnapshot().request, first, 'opening a dialog does not re-read slot props');
+  assert.equal(hub.getSnapshot().request.source.sessionId, 'session-1');
+
+  h.clickButton('保存为提示词');
+  assert.equal(
+    hub.getSnapshot().request,
+    first,
+    'an unsaved open capture is never overwritten by another click',
+  );
+
+  hub.close();
+  h.clickButton('保存为提示词');
+  const second = hub.getSnapshot().request;
+  assert.equal(second.text, '草稿二', 'a later click snapshots the current draft');
+  assert.equal(second.source.sessionId, 'session-2', 'a later click snapshots the current session');
+  hub.close();
+  h.dispose();
+});
+
+test('save-draft entry: follows the active locale', () => {
+  const h = makeHarness();
+  h.setLanguage('en');
+  renderSaveDraft(h, { sessionId: 'session-1', input: { draft: 'draft text' } });
+
+  const button = h.buttonByLabel('Save as prompt');
+  assert.ok(button, 'english label');
+  assert.equal(button.props['aria-label'], 'Save as prompt');
+  const hovered = hoverTipAt(h, 0);
+  assert.match(hovered.text, /whole composer draft/i, 'english hover description is immediate');
+  leaveTip(h, hovered.wrapper);
+  h.dispose();
+});
+
+/* ------------------------------------------------------------------ */
+/* 12. Conversation-selection capture action                           */
+/* ------------------------------------------------------------------ */
+
+test('selection action: reads the selection, opens capture with session snapshot, then dismisses', () => {
+  const h = makeHarness({ uiConversation: true });
+  const capture = fakeCapture();
+  let dismissed = 0;
+  renderSelectionAction(h, {
+    capture,
+    readText: () => '  选中的对话文本  ',
+    dismiss: () => {
+      dismissed += 1;
+    },
+    trigger: 'selection',
+    sessionId: 'session-42',
+  });
+
+  const button = h.buttonByLabel('收录为提示词');
+  assert.ok(button, 'selection action button renders');
+  assert.equal(button.props.type, 'button');
+  assert.equal(button.props.disabled, false);
+
+  let pointerPrevented = false;
+  button.props.onPointerDown({
+    preventDefault() {
+      pointerPrevented = true;
+    },
+  });
+  assert.equal(pointerPrevented, true, 'pointerdown is prevented so the host selection survives');
+
+  h.clickButton('收录为提示词');
+  assert.equal(capture.calls.length, 1, 'capture.open called exactly once');
+  assert.deepEqual(capture.calls[0], {
+    text: '  选中的对话文本  ',
+    source: { kind: 'message', sessionId: 'session-42' },
+  });
+  assert.equal(dismissed, 1, 'overlay is dismissed after handing off');
+  h.dispose();
+});
+
+test('selection action: empty, missing or throwing readText dismisses without opening capture', () => {
+  const h = makeHarness({ uiConversation: true });
+  const capture = fakeCapture();
+  let dismissed = 0;
+  const dismiss = () => {
+    dismissed += 1;
+  };
+  const cases = [
+    () => null,
+    () => '   \n\t ',
+    () => {
+      throw new Error('selection surface already gone');
+    },
+  ];
+
+  for (const readText of cases) {
+    renderSelectionAction(h, {
+      capture,
+      readText,
+      dismiss,
+      trigger: 'selection',
+      sessionId: 'session-1',
+    });
+    h.clickButton('收录为提示词');
+  }
+
+  assert.deepEqual(capture.calls, [], 'nothing captured when there is no selection text');
+  assert.equal(dismissed, cases.length, 'every degraded click closes the overlay');
+  h.dispose();
+});
+
+test('selection action: other triggers render nothing; a missing capture hub degrades safely', () => {
+  const h = makeHarness({ uiConversation: true });
+  const capture = fakeCapture();
+  let dismissed = 0;
+  const dismiss = () => {
+    dismissed += 1;
+  };
+
+  renderSelectionAction(h, {
+    capture,
+    readText: () => 'text',
+    dismiss,
+    trigger: 'menu',
+    sessionId: 'session-1',
+  });
+  assert.equal(h.buttonByLabel('收录为提示词'), undefined, 'only selection triggers render the action');
+  assert.equal(h.text().trim(), '');
+
+  renderSelectionAction(h, {
+    capture: null,
+    readText: () => 'text',
+    dismiss,
+    trigger: 'selection',
+    sessionId: 'session-1',
+  });
+  const disabled = h.buttonByLabel('收录为提示词');
+  assert.ok(disabled, 'button renders but disabled without a capture hub');
+  assert.equal(disabled.props.disabled, true);
+  assert.ok(
+    disabled.props.title && disabled.props.title.includes('未提供'),
+    'unavailable reason is explicit',
+  );
+
+  h.clickButton('收录为提示词');
+  assert.deepEqual(capture.calls, [], 'no capture hub -> nothing opens');
+  assert.equal(dismissed, 1, 'degraded click still dismisses the overlay');
+  h.dispose();
+});
+
+test('selection action: a slot-injected t wins over the locale fallback', () => {
+  const h = makeHarness({ uiConversation: true });
+  const capture = fakeCapture();
+  const base = {
+    capture,
+    readText: () => 'text',
+    dismiss: () => {},
+    trigger: 'selection',
+    sessionId: 'session-1',
+  };
+
+  renderSelectionAction(h, base);
+  assert.ok(h.buttonByLabel('收录为提示词'), 'zh copy by default');
+
+  h.setLanguage('en');
+  renderSelectionAction(h, base);
+  assert.ok(h.buttonByLabel('Save as prompt'), 'english copy after locale switch');
+
+  const seen = [];
+  renderSelectionAction(h, {
+    ...base,
+    t: (key) => {
+      seen.push(key);
+      return 'custom:' + key;
+    },
+  });
+  assert.ok(seen.includes('quick.captureMessage'), 'explicit props.t is used instead of useT');
+  assert.ok(h.text().includes('custom:quick.captureMessage'));
+  h.dispose();
+});
+
+/* ------------------------------------------------------------------ */
+/* 13. Quick picker capture entries                                    */
+/* ------------------------------------------------------------------ */
+
+test('quick panel: quick-capture hands over an empty paste capture and closes the picker', () => {
+  const h = makeHarness();
+  const hub = captureHub(h);
+  h.renderQuick();
+  openPanel(h);
+
+  const button = h.buttonByLabel('快速收录');
+  assert.ok(button, 'quick-capture button is in the panel toolbar');
+  assert.equal(button.props.type, 'button');
+  assert.ok(button.props.title, 'tooltip explains the paste source');
+
+  h.clickButton('快速收录');
+  assert.equal(h.findInput('搜索提示词'), undefined, 'picker yields to the capture dialog');
+
+  const request = hub.getSnapshot().request;
+  assert.ok(request, 'capture dialog received the paste request');
+  assert.equal(request.text, '', 'quick capture starts empty for manual pasting');
+  assert.equal(request.source.kind, 'paste');
+
+  h.renderOverlay();
+  assert.equal(
+    h.findTextarea('提示词正文').props.value,
+    '',
+    'the empty paste dialog is rendered from the shared hub',
+  );
+  hub.close();
+  h.dispose();
+});
+
+test('quick panel: save-draft snapshots the whole composer draft as a composer capture', () => {
+  const h = makeHarness();
+  const hub = captureHub(h);
+  h.renderQuick({ ...h.slotProps, sessionId: 'session-7', input: { draft: CAPTURE_DRAFT } });
+  openPanel(h);
+
+  const button = h.buttonByLabel('保存草稿为提示词');
+  assert.ok(button, 'save-draft button is in the panel toolbar');
+  assert.equal(button.props.disabled, false);
+  assert.deepEqual(h.calls.drafts, []);
+
+  h.clickButton('保存草稿为提示词');
+  assert.equal(h.findInput('搜索提示词'), undefined, 'picker closes after handing off');
+
+  const request = hub.getSnapshot().request;
+  assert.ok(request);
+  assert.equal(request.text, CAPTURE_DRAFT, 'whole draft captured verbatim');
+  assert.equal(request.source.kind, 'composer');
+  assert.equal(request.source.sessionId, 'session-7', 'session id snapshotted at click time');
+  assert.deepEqual(h.calls.drafts, [], 'never calls setDraft');
+  assert.deepEqual(h.calls.inserts, [], 'never submits the draft');
+
+  h.renderOverlay();
+  assert.equal(
+    h.findTextarea('提示词正文').props.value,
+    CAPTURE_DRAFT,
+    'the capture dialog receives the composer draft',
+  );
+  hub.close();
+  h.dispose();
+});
+
+test('quick panel: save-draft is disabled for an empty draft and never opens capture', () => {
+  const h = makeHarness();
+  const hub = captureHub(h);
+  h.renderQuick({ ...h.slotProps, input: { draft: '  \n\t ' } });
+  openPanel(h);
+
+  const button = h.buttonByLabel('保存草稿为提示词');
+  assert.ok(button);
+  assert.equal(button.props.disabled, true, 'empty draft disables save-draft');
+  assert.equal(button.props.title, '输入框为空，暂无可保存的草稿');
+
+  h.clickButton('保存草稿为提示词');
+  assert.equal(hub.getSnapshot().request, null);
+  assert.ok(h.findInput('搜索提示词'), 'panel stays open');
+  h.dispose();
+});
+
+test('quick panel: an already-open capture is never overwritten; the reason is shown', () => {
+  const h = makeHarness();
+  const hub = captureHub(h);
+  hub.open({ text: '已有请求', source: { kind: 'paste' } });
+  h.renderQuick({ ...h.slotProps, input: { draft: '草稿' } });
+  openPanel(h);
+
+  h.clickButton('快速收录');
+  assert.ok(h.text().includes('收录弹层已打开'), 'busy reason for quick capture');
+  h.clickButton('保存草稿为提示词');
+  assert.ok(h.text().includes('收录弹层已打开'), 'busy reason for save-draft');
+
+  const request = hub.getSnapshot().request;
+  assert.equal(request.text, '已有请求', 'the unsaved open capture keeps its text');
+  assert.ok(h.findInput('搜索提示词'), 'picker stays usable after the refusal');
+  hub.close();
+  h.dispose();
 });

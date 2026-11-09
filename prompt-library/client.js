@@ -51,10 +51,14 @@ const AI_REVIEW_MAX_CHARS = 200
 const RATING_MIN = 1
 const RATING_MAX = 5
 const RATING_STEP = 0.5
-const VIEWS = ['all', 'favorites', 'recent']
+const VIEWS = ['all', 'inbox', 'favorites', 'recent']
 const QUALITY_FILTERS = ['any', 'rated4', 'rated3', 'unrated', 'stale']
 const SORTS = ['default', 'updated', 'recent', 'ratingDesc', 'ratingAsc']
-const CSV_HEADERS = ['title', 'body', 'tags', 'usage', 'rating', 'note']
+/** Organize (triage) status of a prompt; unrelated to rating/favorite/pin. */
+const ORGANIZE_STATES = ['inbox', 'organized']
+/** Where a quickly captured prompt came from. */
+const CAPTURE_KINDS = ['paste', 'composer', 'message']
+const CSV_HEADERS = ['title', 'body', 'tags', 'usage', 'rating', 'note', 'organize', 'sourceNote']
 const CSV_HEADER_ALIASES = {
   '标题': 'title',
   '正文': 'body',
@@ -64,6 +68,9 @@ const CSV_HEADER_ALIASES = {
   '评价备注': 'note',
   '个人评分': 'rating',
   '个人评价备注': 'note',
+  '整理状态': 'organize',
+  '来源说明': 'sourceNote',
+  '来源': 'sourceNote',
 }
 
 /* ------------------------------------------------------------------------- */
@@ -250,6 +257,32 @@ function normalizeStars(value) {
   return isValidRating(value) ? value : null
 }
 
+/** Legal organize status, or `undefined` when `value` is not one of them. */
+function validateOrganize(value) {
+  return ORGANIZE_STATES.includes(value) ? value : undefined
+}
+
+/**
+ * Clean quick-capture metadata. Illegal structure yields `null` (`kind` must be
+ * one of `CAPTURE_KINDS` and `at` a finite timestamp); optional string fields
+ * are trimmed, empty ones dropped. Always returns a new object, never mutates
+ * `raw`.
+ */
+function normalizeCapture(raw) {
+  if (raw === null || raw === undefined) return null
+  if (!isRecord(raw)) return null
+  if (!CAPTURE_KINDS.includes(raw.kind)) return null
+  if (typeof raw.at !== 'number' || !Number.isFinite(raw.at)) return null
+  const capture = { kind: raw.kind, at: raw.at }
+  const sessionId = typeof raw.sessionId === 'string' ? raw.sessionId.trim() : ''
+  if (sessionId) capture.sessionId = sessionId
+  const messageId = typeof raw.messageId === 'string' ? raw.messageId.trim() : ''
+  if (messageId) capture.messageId = messageId
+  const note = typeof raw.note === 'string' ? raw.note.trim() : ''
+  if (note) capture.note = note
+  return capture
+}
+
 /** Predictable prompt id for tests and deterministic fixtures. */
 function makePromptId(prefix, seq) {
   const head = typeof prefix === 'string' && prefix.trim() ? prefix.trim() : 'p'
@@ -304,6 +337,8 @@ function normalizePrompt(raw, options) {
     lastUsedAt: timestampOrNull(input.lastUsedAt),
     useCount: typeof input.useCount === 'number' && Number.isInteger(input.useCount) && input.useCount >= 0 ? input.useCount : 0,
     aiReview: copyAiReview(input.aiReview),
+    organize: validateOrganize(input.organize) || 'organized',
+    capture: normalizeCapture(input.capture),
   }
 }
 
@@ -402,6 +437,10 @@ function normalizeState(raw, options) {
       return invalid('第 ' + (index + 1) + ' 条提示词缺少正文')
     }
     const prompt = normalizePrompt(item, { tagIds, now })
+    // Forward-compatible v1 fields: absent (legacy) or invalid values are
+    // defaulted instead of failing, but count as a migration.
+    if (item.organize === undefined || validateOrganize(item.organize) === undefined) migrated = true
+    if (item.capture === undefined || (item.capture !== null && normalizeCapture(item.capture) === null)) migrated = true
     if (promptIds.has(prompt.id)) {
       prompt.id = makeId('p')
       warnings.push('PROMPT_ID_DUPLICATE')
@@ -440,6 +479,112 @@ function sanitizeTagIds(ids, knownTagIds) {
     result.push(id)
   }
   return result
+}
+
+/* ------------------------------------------------------------------------- */
+/* Quick capture helpers                                                     */
+/* ------------------------------------------------------------------------- */
+
+/** Default max visible characters of an auto-suggested capture title. */
+const CAPTURE_TITLE_MAX_CHARS = 40
+
+/** Leading Markdown block markers stripped from the first captured line. */
+const CAPTURE_TITLE_MARKER = /^(?:(?:#{1,6}[ \t]+)|(?:>[ \t]+)|(?:[-*+][ \t]+)|(?:\d+[.)][ \t]+))+/u
+
+/** First `maxVisible` visible code points of `text` (whitespace passes through free). */
+function visiblePrefix(text, maxVisible) {
+  let visible = 0
+  let result = ''
+  for (const char of Array.from(text)) {
+    if (!/\s/u.test(char)) {
+      if (visible >= maxVisible) break
+      visible += 1
+    }
+    result += char
+  }
+  return result
+}
+
+/**
+ * Truncate to at most `maxChars` visible code points in total. Over-long text
+ * keeps `maxChars - 1` visible characters and appends '…' (the ellipsis is a
+ * visible character, so the result never exceeds the budget); text that already
+ * fits is returned unchanged without an ellipsis.
+ */
+function truncateVisibleText(text, maxChars) {
+  let visible = 0
+  for (const char of Array.from(text)) {
+    if (!/\s/u.test(char)) {
+      visible += 1
+      if (visible > maxChars) return visiblePrefix(text, maxChars - 1).replace(/\s+$/u, '') + '…'
+    }
+  }
+  return text
+}
+
+/**
+ * Suggest a capture title from the body: first non-empty line, leading Markdown
+ * markers stripped, ends trimmed, internal whitespace collapsed to one space,
+ * then truncated to at most `maxChars` (default 40) visible characters in
+ * total, ending with '…' when the content had to be cut. Falls back to the raw
+ * trimmed line when stripping leaves nothing and to `''` when the body has no
+ * non-empty line. Never modifies `body`.
+ */
+function suggestCaptureTitle(body, maxChars) {
+  const text = typeof body === 'string' ? body : ''
+  let line
+  for (const candidate of text.split('\n')) {
+    if (candidate.trim() !== '') {
+      line = candidate
+      break
+    }
+  }
+  if (line === undefined) return ''
+  const trimmedStart = line.replace(/^[ \t]+/u, '')
+  let title = trimmedStart.replace(CAPTURE_TITLE_MARKER, '').trim()
+  if (!title) title = line.trim()
+  if (!title) return ''
+  title = title.replace(/\s+/gu, ' ')
+  const limit =
+    typeof maxChars === 'number' && Number.isFinite(maxChars) && maxChars >= 1
+      ? Math.floor(maxChars)
+      : CAPTURE_TITLE_MAX_CHARS
+  return truncateVisibleText(title, limit)
+}
+
+/** Duplicate comparison form: unify newlines, then trim the ends only. */
+function normalizeCaptureBody(body) {
+  return stringOr(body, '').replace(/\r\n?/g, '\n').trim()
+}
+
+/**
+ * Find existing prompts whose body equals a capture candidate.
+ *
+ * - `exact`: body strings are identical.
+ * - `near`: equal after newline normalization (`\r\n?` -> `\n`) and trimming
+ *   the ends, but not identical. Internal whitespace/indentation and case
+ *   differences are never duplicates; only `body` is compared.
+ *
+ * Pure: `data` is only read and the returned arrays hold stored prompts.
+ *
+ * @returns {{exact: object[], near: object[]}}
+ */
+function findCaptureDuplicates(data, body) {
+  const target = typeof body === 'string' ? body : ''
+  const prompts = Array.isArray(data && data.prompts) ? data.prompts : []
+  const normalizedTarget = normalizeCaptureBody(target)
+  const exact = []
+  const near = []
+  for (const prompt of prompts) {
+    if (!isRecord(prompt)) continue
+    const existing = stringOr(prompt.body, '')
+    if (existing === target) {
+      exact.push(prompt)
+      continue
+    }
+    if (normalizeCaptureBody(existing) === normalizedTarget) near.push(prompt)
+  }
+  return { exact, near }
 }
 
 /* ------------------------------------------------------------------------- */
@@ -569,6 +714,7 @@ function tagUsageCount(data, tagId) {
 
 /** View membership test. */
 function matchesView(prompt, view) {
+  if (view === 'inbox') return Boolean(prompt && prompt.organize === 'inbox')
   if (view === 'favorites') return Boolean(prompt && prompt.favorite)
   if (view === 'recent') return Boolean(prompt && typeof prompt.lastUsedAt === 'number' && Number.isFinite(prompt.lastUsedAt))
   return true
@@ -769,6 +915,8 @@ function createPrompt(input) {
     lastUsedAt: null,
     useCount: 0,
     aiReview: null,
+    organize: validateOrganize(source.organize) || 'organized',
+    capture: normalizeCapture(source.capture),
   }
 }
 
@@ -776,6 +924,9 @@ function createPrompt(input) {
  * Apply a content/tag edit. `title`/`body`/`usage` changes refresh updatedAt;
  * only a body change increments bodyVersion (which makes an existing rating
  * stale while keeping its stars/note/version association for display).
+ * `organize`/`capture` are independent metadata: they are preserved unless
+ * explicitly patched and never refresh updatedAt (`capture.at` is immutable on
+ * ordinary edits).
  */
 function updatePrompt(prompt, updates, now) {
   const base = normalizePrompt(prompt)
@@ -785,6 +936,12 @@ function updatePrompt(prompt, updates, now) {
   if (patch.body !== undefined) next.body = stringOr(patch.body, '')
   if (patch.usage !== undefined) next.usage = stringOr(patch.usage, '')
   if (patch.tagIds !== undefined) next.tagIds = sanitizeTagIds(patch.tagIds)
+  if (patch.organize !== undefined) next.organize = validateOrganize(patch.organize) || base.organize
+  if (patch.capture !== undefined) {
+    const nextCapture = normalizeCapture(patch.capture)
+    // `null` explicitly clears; an illegal object keeps the existing metadata.
+    next.capture = nextCapture === null && patch.capture !== null ? base.capture : nextCapture
+  }
   const contentChanged = next.title !== base.title || next.body !== base.body || next.usage !== base.usage
   if (next.body !== base.body) next.bodyVersion = promptBodyVersion(base) + 1
   if (contentChanged) next.updatedAt = resolveNow(now)
@@ -804,6 +961,18 @@ function setPromptFlag(prompt, key, value) {
   const next = { ...base }
   next[key] = value === true
   return next
+}
+
+/**
+ * Set the organize status ('inbox' | 'organized'). Returns a new prompt and,
+ * like the other triage flags, does not refresh updatedAt; an illegal status
+ * leaves the prompt unchanged.
+ */
+function setOrganize(prompt, status) {
+  const base = normalizePrompt(prompt)
+  const organize = validateOrganize(status)
+  if (!organize) return base
+  return { ...base, organize }
 }
 
 /** Set or clear the personal rating (null clears stars, keeps note). */
@@ -981,6 +1150,7 @@ function toCsv(data, promptIds) {
       .map((tagId) => nameById.get(tagId))
       .filter((name) => typeof name === 'string' && name)
     const rating = normalizeStars(prompt.score && prompt.score.stars)
+    const capture = normalizeCapture(prompt.capture)
     lines.push(
       [
         csvEscapeField(stringOr(prompt.title, '')),
@@ -989,6 +1159,9 @@ function toCsv(data, promptIds) {
         csvEscapeField(stringOr(prompt.usage, '')),
         csvEscapeField(ratingToCsvField(rating)),
         csvEscapeField(stringOr(prompt.score && prompt.score.note, '')),
+        csvEscapeField(validateOrganize(prompt.organize) || 'organized'),
+        // Only the user-facing source note is exported; sessionId/messageId stay in JSON backups.
+        csvEscapeField(capture ? capture.note || '' : ''),
       ].join(','),
     )
   }
@@ -1077,11 +1250,14 @@ function parseCsv(text) {
   const warnings = []
   const seenColumns = new Set()
   const columnIndex = new Map()
+  // Canonical headers are matched case-insensitively (`sourceNote` -> `sourcenote`).
+  const canonicalHeaderByLower = new Map()
+  for (const header of CSV_HEADERS) canonicalHeaderByLower.set(header.toLowerCase(), header)
   for (let cellIndex = 0; cellIndex < headerCells.length; cellIndex += 1) {
     const rawHeader = headerCells[cellIndex].trim()
     if (!rawHeader) continue
     const lowered = rawHeader.toLowerCase()
-    const canonical = CSV_HEADER_ALIASES[lowered] || (CSV_HEADERS.includes(lowered) ? lowered : '')
+    const canonical = CSV_HEADER_ALIASES[lowered] || canonicalHeaderByLower.get(lowered) || ''
     if (!canonical) {
       warnings.push('UNKNOWN_COLUMN:' + rawHeader)
       continue
@@ -1115,6 +1291,8 @@ function parseCsv(text) {
       usage: read('usage'),
       rating: read('rating'),
       note: read('note'),
+      organize: read('organize'),
+      sourceNote: read('sourceNote'),
       line: record.line,
     })
   }
@@ -1128,7 +1306,9 @@ function duplicateKey(title, body) {
 
 /**
  * Build an import preview: new prompts (ids/tagIds assigned), new tag objects,
- * per-row duplicates/invalids, and counts. Pure: `data` is not modified.
+ * per-row duplicates/invalids, and counts. Organize defaults to 'organized'
+ * and a non-empty source note becomes paste-capture metadata. Pure: `data` is
+ * not modified.
  *
  * @param {Array} rows rows produced by `parseCsv`
  * @param {object} data current data root
@@ -1234,6 +1414,12 @@ function validateCsvRows(rows, data, now, makeId) {
     }
     importDuplicateKeys.add(key)
 
+    // Imported rows default to 'organized' (old CSV files have no organize
+    // column); a non-empty source note becomes paste-capture metadata. The
+    // import duplicate rule still compares title + body only.
+    const organize = validateOrganize(stringOr(row.organize, '').trim()) || 'organized'
+    const sourceNote = stringOr(row.sourceNote, '').trim()
+
     const tagIds = []
     for (const name of tagNames) {
       const tagId = resolveTagId(name)
@@ -1249,6 +1435,8 @@ function validateCsvRows(rows, data, now, makeId) {
       usage: stringOr(row.usage, ''),
       tagIds,
       now: stamp,
+      organize,
+      capture: sourceNote ? { kind: 'paste', at: stamp, note: sourceNote } : null,
     })
     prompt.score = {
       stars,
@@ -1375,6 +1563,24 @@ function validateBackupPrompt(prompt, knownTagIds, index) {
     if (!isRecord(review.input)) return { code: 'INVALID_DATA', message: 'aiReview.input 缺失' }
     if (typeof review.input.title !== 'string' || typeof review.input.body !== 'string' || typeof review.input.usage !== 'string') {
       return { code: 'INVALID_DATA', message: 'aiReview.input 必须包含 title/body/usage 字符串' }
+    }
+  }
+  // Forward-compatible v1 fields (quick capture). Absent means a legacy
+  // backup (defaulted to 'organized'/null); present values are validated
+  // strictly so a damaged file is rejected instead of silently rewritten.
+  if (prompt.organize !== undefined && !ORGANIZE_STATES.includes(prompt.organize)) {
+    return { code: 'INVALID_DATA', message: 'organize 必须是 inbox 或 organized' }
+  }
+  if (prompt.capture !== undefined && prompt.capture !== null) {
+    if (!isRecord(prompt.capture)) return { code: 'INVALID_DATA', message: 'capture 必须是对象或 null' }
+    if (!CAPTURE_KINDS.includes(prompt.capture.kind)) return { code: 'INVALID_DATA', message: 'capture.kind 不合法' }
+    if (typeof prompt.capture.at !== 'number' || !Number.isFinite(prompt.capture.at)) {
+      return { code: 'INVALID_DATA', message: 'capture.at 必须是时间戳' }
+    }
+    for (const key of ['sessionId', 'messageId', 'note']) {
+      if (prompt.capture[key] !== undefined && typeof prompt.capture[key] !== 'string') {
+        return { code: 'INVALID_DATA', message: 'capture.' + key + ' 必须是字符串' }
+      }
     }
   }
   if (Array.isArray(prompt.tagIds)) {
@@ -1673,6 +1879,734 @@ function validateAiReviewText(text) {
 }
 
     /* ===== end core.js ===== */
+    /* ===== src/capture.js ===== */
+/**
+ * Quick-capture overlay — generated/embedded fragment (owner: Lead).
+ *
+ * One shared capture dialog hosted in the root-scoped `shell.overlay` slot so it
+ * survives composer/chat surface changes. Entry points (full panel, quick panel,
+ * composer toolbar, chat text selection) only call `capture.open({text, source})`
+ * with a synchronous snapshot; the dialog never reads the clipboard, never
+ * touches host DOM, never sends messages and never rewrites the draft.
+ *
+ * Save path goes through the existing store (`createPrompt`), so persistence,
+ * validation, failure handling and data migration stay in one place.
+ */
+
+const CAPTURE_DICT = {
+  zh: {
+    'capture.title': '快速收录',
+    'capture.subtitle': '先保存，再整理。原文会按你填写的内容原样保留。',
+    'capture.bodyLabel': '正文',
+    'capture.bodyPlaceholder': '粘贴或输入要保存的提示词；换行与缩进会原样保留。',
+    'capture.bodyRequired': '正文不能为空',
+    'capture.bodyAria': '提示词正文',
+    'capture.titleLabel': '标题',
+    'capture.titlePlaceholder': '留空将根据正文自动生成',
+    'capture.titleAria': '提示词标题',
+    'capture.autoTitleHint': '未填写标题时，自动使用正文首个非空行（最多 40 个可见字符）。',
+    'capture.tagsLabel': '标签',
+    'capture.tagsEmpty': '还没有标签，可稍后在提示库中创建并整理。',
+    'capture.more': '更多选项',
+    'capture.less': '收起选项',
+    'capture.usageLabel': '使用场景',
+    'capture.usagePlaceholder': '可选：预期效果 / 使用场景',
+    'capture.sourceNoteLabel': '来源说明',
+    'capture.sourceNotePlaceholder': '可选：例如来自某篇文档或某次对话',
+    'capture.inboxTarget': '保存到：收件箱',
+    'capture.inboxHint': '收录后可在「收件箱」集中整理；不影响当前草稿或消息。',
+    'capture.save': '收录',
+    'capture.saving': '保存中…',
+    'capture.cancel': '取消',
+    'capture.saveShortcut': 'Ctrl/Cmd + Enter 保存',
+    'capture.discardTitle': '放弃这次收录？',
+    'capture.discardMessage': '正文、标题和标签等尚未保存的内容将丢失。',
+    'capture.discardConfirm': '放弃收录',
+    'capture.discardCancel': '继续编辑',
+    'capture.duplicateTitle': '发现重复内容',
+    'capture.duplicateExact': '此内容已收录',
+    'capture.duplicateNear': '发现疑似重复内容（仅首尾空白或换行编码不同）',
+    'capture.duplicateHint': '可先查看已有条目，或仍然另存为新条目。另存不会继承已有条目的评分、使用次数或 AI 评价。',
+    'capture.exactBadge': '完全相同',
+    'capture.nearBadge': '疑似重复',
+    'capture.viewExisting': '查看已有',
+    'capture.backToEdit': '返回继续编辑',
+    'capture.saveAnyway': '仍然另存',
+    'capture.previewTitle': '已有条目预览',
+    'capture.previewMeta': '可在提示库中查看完整内容与评分。',
+    'capture.previewBack': '返回',
+    'capture.previewBodyAria': '已有提示词正文',
+    'capture.savedTitle': '已收录',
+    'capture.savedBody': '已保存到收件箱。',
+    'capture.viewSaved': '查看',
+    'capture.continueCapture': '继续收录',
+    'capture.close': '关闭',
+    'capture.saveError': '保存失败：{message}',
+    'capture.hintComposer': '当前 DSH 接口只提供整份草稿文本，无法安全读取选区；这里已收录整份草稿。若只需选区，请复制后使用「快速收录」。',
+    'capture.hintMessage': '已收录你在对话中选中的文本。来源会话会记录在提示词元数据中。',
+    'capture.moreTags': '共 {n} 个标签',
+  },
+  en: {
+    'capture.title': 'Quick capture',
+    'capture.subtitle': 'Save first, organize later. The text you enter is kept exactly as written.',
+    'capture.bodyLabel': 'Prompt text',
+    'capture.bodyPlaceholder': 'Paste or type the prompt to save; line breaks and indentation are preserved.',
+    'capture.bodyRequired': 'Prompt text is required',
+    'capture.bodyAria': 'Prompt text',
+    'capture.titleLabel': 'Title',
+    'capture.titlePlaceholder': 'Leave empty to generate from the text',
+    'capture.titleAria': 'Prompt title',
+    'capture.autoTitleHint': 'Without a title, the first non-empty line is used (up to 40 visible characters).',
+    'capture.tagsLabel': 'Tags',
+    'capture.tagsEmpty': 'No tags yet; create and organize them in the library later.',
+    'capture.more': 'More options',
+    'capture.less': 'Hide options',
+    'capture.usageLabel': 'Usage scenario',
+    'capture.usagePlaceholder': 'Optional: expected effect / usage scenario',
+    'capture.sourceNoteLabel': 'Source note',
+    'capture.sourceNotePlaceholder': 'Optional: e.g. from a document or a conversation',
+    'capture.inboxTarget': 'Save to: Inbox',
+    'capture.inboxHint': 'Organize it later in Inbox; the current draft or message is not touched.',
+    'capture.save': 'Capture',
+    'capture.saving': 'Saving…',
+    'capture.cancel': 'Cancel',
+    'capture.saveShortcut': 'Ctrl/Cmd + Enter to save',
+    'capture.discardTitle': 'Discard this capture?',
+    'capture.discardMessage': 'Unsaved text, title and tags will be lost.',
+    'capture.discardConfirm': 'Discard capture',
+    'capture.discardCancel': 'Keep editing',
+    'capture.duplicateTitle': 'Duplicate content found',
+    'capture.duplicateExact': 'This content is already in the library',
+    'capture.duplicateNear': 'Likely duplicate (only leading/trailing whitespace or line endings differ)',
+    'capture.duplicateHint': 'Preview the existing entries, or save anyway as a new entry. Saving anyway does not inherit their rating, usage count or AI review.',
+    'capture.exactBadge': 'Same text',
+    'capture.nearBadge': 'Likely duplicate',
+    'capture.viewExisting': 'View existing',
+    'capture.backToEdit': 'Back to editing',
+    'capture.saveAnyway': 'Save anyway',
+    'capture.previewTitle': 'Existing entry preview',
+    'capture.previewMeta': 'Open the library for the full content and rating.',
+    'capture.previewBack': 'Back',
+    'capture.previewBodyAria': 'Existing prompt text',
+    'capture.savedTitle': 'Captured',
+    'capture.savedBody': 'Saved to Inbox.',
+    'capture.viewSaved': 'View',
+    'capture.continueCapture': 'Capture another',
+    'capture.close': 'Close',
+    'capture.saveError': 'Save failed: {message}',
+    'capture.hintComposer': 'This DSH version exposes only the whole draft, not a safe reading API for the selection; the whole draft was captured. To capture only a selection, copy it and use Quick capture.',
+    'capture.hintMessage': 'Captured the text you selected in the conversation. The source session is recorded in the prompt metadata.',
+    'capture.moreTags': '{n} tags',
+  },
+};
+
+const CAPTURE_CSS = [
+  '.pl-capture-shell{display:flex;flex-direction:column;gap:12px}',
+  '.pl-capture-sub{margin:0;color:var(--dsw-alias-label-secondary);font-size:12.5px;line-height:1.6}',
+  '.pl-capture-banner{display:flex;gap:8px;padding:8px 10px;border:.5px solid var(--dsw-alias-border-l1);border-radius:9px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-secondary);font-size:12.3px;line-height:1.6}',
+  '.pl-capture-target{display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:12.3px;color:var(--dsw-alias-label-secondary)}',
+  '.pl-capture-target strong{color:var(--dsw-alias-label-primary);font-weight:600}',
+  '.pl-capture-body{min-height:160px;max-height:38vh}',
+  '.pl-capture-title-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px}',
+  '.pl-capture-title-row .pl-input{flex:1;min-width:180px}',
+  '.pl-capture-field-error{margin:4px 0 0;color:var(--dsw-alias-state-error-primary,#b3261e);font-size:12px}',
+  '.pl-capture-tags{display:flex;flex-wrap:wrap;gap:6px 12px}',
+  '.pl-capture-tag{display:inline-flex;align-items:center;gap:5px;font-size:12.5px;color:var(--dsw-alias-label-primary);cursor:pointer}',
+  '.pl-capture-tag input{accent-color:var(--dsw-alias-brand-primary)}',
+  '.pl-capture-more-toggle{align-self:flex-start}',
+  '.pl-capture-more{display:flex;flex-direction:column;gap:12px;padding:10px;border:.5px solid var(--dsw-alias-border-l1);border-radius:9px;background:var(--dsw-alias-bg-layer-1)}',
+  '.pl-capture-foot{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:8px}',
+  '.pl-capture-foot-hint{margin-right:auto;color:var(--dsw-alias-label-secondary);font-size:11.5px}',
+  '.pl-capture-dups{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:6px;max-height:34vh;overflow:auto}',
+  '.pl-capture-dup{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:8px 10px;border:.5px solid var(--dsw-alias-border-l1);border-radius:9px;background:var(--dsw-alias-bg-layer-1)}',
+  '.pl-capture-dup-title{flex:1;min-width:140px;font-size:13px;font-weight:500;overflow-wrap:anywhere}',
+  '.pl-capture-dup-badge{flex:none;padding:1px 7px;border-radius:999px;background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-secondary);font-size:11px}',
+  '.pl-capture-dup-badge-exact{color:var(--dsw-alias-state-warn-primary,#d4a72c)}',
+  '.pl-capture-preview-body{margin:0;max-height:36vh;overflow:auto;padding:10px;border-radius:8px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font:12.8px/1.65 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere}',
+  '.pl-capture-success{display:flex;flex-direction:column;gap:10px;padding:12px;border:.5px solid color-mix(in srgb,var(--dsw-alias-state-success-primary,#2f9e44) 35%,transparent);border-radius:10px;background:color-mix(in srgb,var(--dsw-alias-state-success-primary,#2f9e44) 10%,transparent);color:var(--dsw-alias-state-success-primary,#2f9e44)}',
+  '.pl-capture-success-title{margin:0;font-size:14px;font-weight:600}',
+  '.pl-capture-success-body{margin:0;font-size:12.5px;line-height:1.6;color:var(--dsw-alias-label-secondary)}',
+  '.pl-capture-confirm{padding:8px 10px;border:.5px solid color-mix(in srgb,var(--dsw-alias-state-warn-primary,#d4a72c) 35%,transparent);border-radius:9px;background:color-mix(in srgb,var(--dsw-alias-state-warn-primary,#d4a72c) 10%,transparent);color:var(--dsw-alias-label-primary);font-size:12.5px}',
+  '@media (max-width:640px){.pl-capture-body{min-height:120px;max-height:32vh}.pl-capture-title-row .pl-input{min-width:0}}',
+].join('');
+
+/** Shared, tiny open-request hub: entry points publish a snapshot, the overlay consumes it. */
+function createCaptureHub() {
+  const listeners = new Set();
+  let sequence = 0;
+  let request = null;
+  let snapshot = { seq: 0, request: null };
+  function emit() {
+    snapshot = { seq: sequence, request };
+    for (const listener of Array.from(listeners)) {
+      try {
+        listener();
+      } catch (error) {
+        /* a broken subscriber must not break capture */
+      }
+    }
+  }
+  function normalizeSource(source) {
+    const raw = source && typeof source === 'object' ? source : {};
+    const kind = raw.kind === 'composer' || raw.kind === 'message' ? raw.kind : 'paste';
+    return {
+      kind,
+      sessionId: typeof raw.sessionId === 'string' && raw.sessionId ? raw.sessionId : undefined,
+      messageId: typeof raw.messageId === 'string' && raw.messageId ? raw.messageId : undefined,
+    };
+  }
+  return {
+    getSnapshot() {
+      return snapshot;
+    },
+    subscribe(listener) {
+      if (typeof listener !== 'function') return () => {};
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    /** Publish one capture request; an unsaved open capture is never overwritten. */
+    open(payload) {
+      if (request !== null) return false;
+      const source = payload && typeof payload === 'object' ? normalizeSource(payload.source) : normalizeSource(null);
+      request = {
+        text: typeof (payload && payload.text) === 'string' ? payload.text : '',
+        source,
+      };
+      sequence += 1;
+      emit();
+      return true;
+    },
+    close() {
+      if (request === null) return;
+      request = null;
+      sequence += 1;
+      emit();
+    },
+  };
+}
+
+function captureTagIdsFromPrompt(prompt) {
+  return prompt && Array.isArray(prompt.tagIds) ? prompt.tagIds.slice() : [];
+}
+
+/**
+ * The shared capture dialog. Rendered inside the root `shell.overlay` slot so a
+ * chat selection surface or composer popover can close without losing input.
+ */
+function PromptLibraryCaptureHost(props) {
+  const capture = props.capture;
+  const store = props.store;
+  const focus = props.focus;
+  const getLayout = typeof props.getLayout === 'function' ? props.getLayout : () => undefined;
+  const t = props.t;
+  const locale = props.locale;
+  const snapshot = React.useSyncExternalStore(capture.subscribe, capture.getSnapshot);
+  const request = snapshot.request;
+  if (!request) return null;
+  return h(PromptLibraryCaptureDialog, {
+    key: 'capture-' + String(snapshot.seq),
+    request,
+    capture,
+    store,
+    focus,
+    getLayout,
+    t,
+    locale,
+  });
+}
+
+function PromptLibraryCaptureDialog(props) {
+  const { request, capture, store, focus, getLayout, t, locale } = props;
+  const initialText = String(request.text || '');
+  const [activeSource, setActiveSource] = React.useState(() => request.source || { kind: 'paste' });
+  const [body, setBody] = React.useState(initialText);
+  const [title, setTitle] = React.useState(() => suggestCaptureTitle(initialText));
+  const [titleDirty, setTitleDirty] = React.useState(false);
+  const [usage, setUsage] = React.useState('');
+  const [sourceNote, setSourceNote] = React.useState('');
+  const [tagIds, setTagIds] = React.useState([]);
+  const [moreOpen, setMoreOpen] = React.useState(false);
+  const [saving, setSaving] = React.useState(false);
+  const [error, setError] = React.useState(null);
+  const [fieldError, setFieldError] = React.useState(false);
+  const [phase, setPhase] = React.useState('edit');
+  const [duplicates, setDuplicates] = React.useState(null);
+  const [preview, setPreview] = React.useState(null);
+  const [saved, setSaved] = React.useState(null);
+  const [discardOpen, setDiscardOpen] = React.useState(false);
+  const bodyRef = React.useRef(null);
+  const composingRef = React.useRef(false);
+  const resetFocusRef = React.useRef(0);
+  const savingRef = React.useRef(false);
+
+  React.useEffect(() => {
+    const element = bodyRef.current;
+    if (element && typeof element.focus === 'function') {
+      try {
+        element.focus();
+      } catch (error) {
+        /* ignore */
+      }
+    }
+  }, []);
+
+  React.useEffect(() => {
+    if (resetFocusRef.current === 0) return;
+    const element = bodyRef.current;
+    if (element && typeof element.focus === 'function') {
+      try {
+        element.focus();
+      } catch (error) {
+        /* ignore */
+      }
+    }
+  }, [resetFocusRef.current]);
+
+  const data = store.getSnapshot().data;
+  const tags = sortTags(data.tags);
+  const hasContent = Boolean(
+    body.trim() || title.trim() || usage.trim() || sourceNote.trim() || tagIds.length,
+  );
+
+  function close() {
+    setDiscardOpen(false);
+    capture.close();
+  }
+
+  function requestClose() {
+    if (saving) return;
+    if (phase === 'success') {
+      close();
+      return;
+    }
+    if (discardOpen) {
+      setDiscardOpen(false);
+      return;
+    }
+    if (hasContent) {
+      setDiscardOpen(true);
+      return;
+    }
+    close();
+  }
+
+  function onBodyChange(event) {
+    const value = event && event.target ? event.target.value : '';
+    setBody(value);
+    setFieldError(false);
+    if (!titleDirty) setTitle(suggestCaptureTitle(value));
+  }
+
+  function onTitleChange(event) {
+    const value = event && event.target ? event.target.value : '';
+    setTitle(value);
+    if (value.trim() === '') {
+      setTitleDirty(false);
+      setTitle(suggestCaptureTitle(body));
+    } else {
+      setTitleDirty(true);
+    }
+  }
+
+  function toggleTag(tagId) {
+    setTagIds((previous) =>
+      previous.includes(tagId) ? previous.filter((id) => id !== tagId) : previous.concat([tagId]),
+    );
+  }
+
+  function onKeyDown(event) {
+    if (!event || event.key !== 'Enter') return;
+    if (!(event.metaKey || event.ctrlKey)) return;
+    const composing =
+      composingRef.current ||
+      event.isComposing === true ||
+      (event.nativeEvent && event.nativeEvent.isComposing === true) ||
+      event.keyCode === 229 ||
+      (event.nativeEvent && event.nativeEvent.keyCode === 229);
+    if (composing) return;
+    if (typeof event.preventDefault === 'function') event.preventDefault();
+    attemptSave(false);
+  }
+
+  function attemptSave(saveAnyway) {
+    if (savingRef.current || saving) return;
+    if (phase === 'success') return;
+    const rawBody = body;
+    if (!rawBody.trim()) {
+      setFieldError(true);
+      setError(t('capture.bodyRequired'));
+      return;
+    }
+    let effectiveTitle = title.trim();
+    if (!effectiveTitle) {
+      effectiveTitle = suggestCaptureTitle(rawBody);
+      setTitle(effectiveTitle);
+      setTitleDirty(false);
+    }
+    if (!effectiveTitle) {
+      setFieldError(true);
+      setError(t('err.TITLE_REQUIRED'));
+      return;
+    }
+    if (!saveAnyway) {
+      const found = findCaptureDuplicates(store.getData(), rawBody);
+      if (found.exact.length > 0 || found.near.length > 0) {
+        setDuplicates(found);
+        setPreview(null);
+        setPhase('duplicates');
+        return;
+      }
+    }
+    savingRef.current = true;
+    setSaving(true);
+    setError(null);
+    setFieldError(false);
+    let result;
+    try {
+      result = store.createPrompt({
+        title: effectiveTitle,
+        body: rawBody,
+        usage,
+        tagIds,
+        organize: 'inbox',
+        capture: {
+          kind: activeSource.kind,
+          at: Date.now(),
+          sessionId: activeSource.sessionId,
+          messageId: activeSource.messageId,
+          note: sourceNote.trim() ? sourceNote.trim() : undefined,
+        },
+      });
+    } catch (failure) {
+      result = { ok: false, error: { code: 'STORAGE_WRITE_FAILED', message: String((failure && failure.message) || failure) } };
+    }
+    savingRef.current = false;
+    setSaving(false);
+    if (!result || !result.ok) {
+      setError(t('capture.saveError', { message: describeError(t, result && result.error) }));
+      return;
+    }
+    const created = result.prompt;
+    setSaved({ id: created && created.id ? created.id : '', title: effectiveTitle });
+    setDuplicates(null);
+    setPreview(null);
+    setPhase('success');
+  }
+
+  function continueCapture() {
+    setBody('');
+    setTitle('');
+    setTitleDirty(false);
+    setUsage('');
+    setSourceNote('');
+    setTagIds([]);
+    setMoreOpen(false);
+    setError(null);
+    setFieldError(false);
+    setDuplicates(null);
+    setPreview(null);
+    setSaved(null);
+    setPhase('edit');
+    setDiscardOpen(false);
+    setActiveSource({ kind: 'paste' });
+    resetFocusRef.current += 1;
+  }
+
+  function viewSaved() {
+    const layout = getLayout();
+    const id = saved && saved.id ? saved.id : '';
+    capture.close();
+    if (layout && typeof layout.selectPanel === 'function') {
+      try {
+        layout.selectPanel('prompt-library');
+      } catch (error) {
+        /* panel opens on next navigation attempt */
+      }
+    }
+    if (id && focus && typeof focus.request === 'function') focus.request(id);
+  }
+
+  const bodyField = h(
+    'div',
+    { className: 'pl-field' },
+    h('label', { className: 'pl-label', htmlFor: 'pl-capture-body' }, t('capture.bodyLabel')),
+    h('textarea', {
+      id: 'pl-capture-body',
+      ref: bodyRef,
+      className: 'pl-textarea pl-capture-body',
+      'aria-label': t('capture.bodyAria'),
+      placeholder: t('capture.bodyPlaceholder'),
+      value: body,
+      onChange: onBodyChange,
+      onKeyDown,
+      onCompositionStart: () => {
+        composingRef.current = true;
+      },
+      onCompositionEnd: () => {
+        composingRef.current = false;
+      },
+    }),
+    fieldError ? h('p', { className: 'pl-capture-field-error', role: 'alert' }, t('capture.bodyRequired')) : null,
+  );
+
+  const titleField = h(
+    'div',
+    { className: 'pl-field' },
+    h('label', { className: 'pl-label' }, t('capture.titleLabel')),
+    h('input', {
+      type: 'text',
+      className: 'pl-input',
+      'aria-label': t('capture.titleAria'),
+      placeholder: t('capture.titlePlaceholder'),
+      value: title,
+      onChange: onTitleChange,
+      onKeyDown,
+    }),
+    h('p', { className: 'pl-field-hint' }, t('capture.autoTitleHint')),
+  );
+
+  const tagsField = h(
+    'div',
+    { className: 'pl-field' },
+    h('label', { className: 'pl-label' }, t('capture.tagsLabel')),
+    tags.length
+      ? h(
+          'div',
+          { className: 'pl-capture-tags' },
+          tags.map((tag) =>
+            h(
+              'label',
+              { key: tag.id, className: 'pl-capture-tag' },
+              h('input', {
+                type: 'checkbox',
+                'aria-label': tag.name,
+                checked: tagIds.includes(tag.id),
+                onChange: () => toggleTag(tag.id),
+              }),
+              h('span', null, tag.name),
+            ),
+          ),
+        )
+      : h('p', { className: 'pl-muted' }, t('capture.tagsEmpty')),
+  );
+
+  const moreSection = moreOpen
+    ? h(
+        'div',
+        { className: 'pl-capture-more' },
+        h(
+          'div',
+          { className: 'pl-field' },
+          h('label', { className: 'pl-label' }, t('capture.usageLabel')),
+          h('textarea', {
+            className: 'pl-textarea',
+            'aria-label': t('capture.usageLabel'),
+            placeholder: t('capture.usagePlaceholder'),
+            value: usage,
+            onChange: (event) => setUsage(event && event.target ? event.target.value : ''),
+          }),
+        ),
+        h(
+          'div',
+          { className: 'pl-field' },
+          h('label', { className: 'pl-label' }, t('capture.sourceNoteLabel')),
+          h('input', {
+            type: 'text',
+            className: 'pl-input',
+            'aria-label': t('capture.sourceNoteLabel'),
+            placeholder: t('capture.sourceNotePlaceholder'),
+            value: sourceNote,
+            onChange: (event) => setSourceNote(event && event.target ? event.target.value : ''),
+          }),
+        ),
+      )
+    : null;
+
+  const hint =
+    activeSource.kind === 'composer'
+      ? t('capture.hintComposer')
+      : activeSource.kind === 'message'
+        ? t('capture.hintMessage')
+        : '';
+
+  const duplicateList = duplicates
+    ? h(
+        'ul',
+        { className: 'pl-capture-dups', 'aria-label': t('capture.duplicateTitle') },
+        duplicates.exact.map((prompt) =>
+          h(
+            'li',
+            { key: 'exact-' + prompt.id, className: 'pl-capture-dup' },
+            h('span', { className: 'pl-capture-dup-title' }, prompt.title),
+            h('span', { className: 'pl-capture-dup-badge pl-capture-dup-badge-exact' }, t('capture.exactBadge')),
+            h(
+              'button',
+              { type: 'button', className: 'pl-btn', onClick: () => setPreview({ prompt, exact: true }) },
+              t('capture.viewExisting'),
+            ),
+          ),
+        ),
+        duplicates.near.map((prompt) =>
+          h(
+            'li',
+            { key: 'near-' + prompt.id, className: 'pl-capture-dup' },
+            h('span', { className: 'pl-capture-dup-title' }, prompt.title),
+            h('span', { className: 'pl-capture-dup-badge' }, t('capture.nearBadge')),
+            h(
+              'button',
+              { type: 'button', className: 'pl-btn', onClick: () => setPreview({ prompt, exact: false }) },
+              t('capture.viewExisting'),
+            ),
+          ),
+        ),
+      )
+    : null;
+
+  let content = null;
+  let footer = null;
+
+  if (phase === 'success' && saved) {
+    content = h(
+      'div',
+      { className: 'pl-capture-success', role: 'status' },
+      h('p', { className: 'pl-capture-success-title' }, t('capture.savedTitle') + ' · ' + saved.title),
+      h('p', { className: 'pl-capture-success-body' }, t('capture.savedBody')),
+    );
+    footer = h(
+      'div',
+      { className: 'pl-capture-foot' },
+      saved.id
+        ? h('button', { type: 'button', className: 'pl-btn pl-btn-primary', onClick: viewSaved }, t('capture.viewSaved'))
+        : null,
+      h('button', { type: 'button', className: 'pl-btn', onClick: continueCapture }, t('capture.continueCapture')),
+      h('button', { type: 'button', className: 'pl-btn pl-btn-ghost', onClick: close }, t('capture.close')),
+    );
+  } else if (phase === 'duplicates' && duplicates) {
+    content = preview
+      ? h(
+          'div',
+          { className: 'pl-capture-shell' },
+          h('h3', { className: 'pl-section-title' }, t('capture.previewTitle')),
+          h('p', { className: 'pl-capture-dup-title' }, preview.prompt.title),
+          h('p', { className: 'pl-capture-sub' }, t('capture.previewMeta')),
+          h('pre', { className: 'pl-capture-preview-body', 'aria-label': t('capture.previewBodyAria') }, preview.prompt.body),
+          h(
+            'div',
+            { className: 'pl-capture-foot' },
+            h('button', { type: 'button', className: 'pl-btn', onClick: () => setPreview(null) }, t('capture.previewBack')),
+          ),
+        )
+      : h(
+          'div',
+          { className: 'pl-capture-shell' },
+          h('h3', { className: 'pl-section-title' }, t('capture.duplicateTitle')),
+          h(
+            'p',
+            { className: 'pl-capture-sub' },
+            duplicates.exact.length > 0 ? t('capture.duplicateExact') : t('capture.duplicateNear'),
+          ),
+          duplicateList,
+          h('p', { className: 'pl-capture-sub' }, t('capture.duplicateHint')),
+        );
+    footer = preview
+      ? h(
+          'div',
+          { className: 'pl-capture-foot' },
+          h('button', { type: 'button', className: 'pl-btn', onClick: () => setPreview(null) }, t('capture.previewBack')),
+        )
+      : h(
+          'div',
+          { className: 'pl-capture-foot' },
+          h(
+            'button',
+            { type: 'button', className: 'pl-btn', onClick: () => { setPhase('edit'); setDuplicates(null); setPreview(null); } },
+            t('capture.backToEdit'),
+          ),
+          h(
+            'button',
+            { type: 'button', className: 'pl-btn pl-btn-primary', onClick: () => attemptSave(true), disabled: saving },
+            t('capture.saveAnyway'),
+          ),
+        );
+  } else {
+    content = h(
+      'div',
+      { className: 'pl-capture-shell' },
+      h('p', { className: 'pl-capture-sub' }, t('capture.subtitle')),
+      hint ? h('div', { className: 'pl-capture-banner', role: 'note' }, hint) : null,
+      h(
+        'div',
+        { className: 'pl-capture-target' },
+        h('strong', null, t('capture.inboxTarget')),
+        h('span', null, '· ' + t('capture.inboxHint')),
+      ),
+      bodyField,
+      titleField,
+      tagsField,
+      h(
+        'button',
+        {
+          type: 'button',
+          className: 'pl-btn pl-btn-ghost pl-capture-more-toggle',
+          'aria-expanded': moreOpen,
+          onClick: () => setMoreOpen(!moreOpen),
+        },
+        moreOpen ? t('capture.less') : t('capture.more'),
+      ),
+      moreSection,
+      error ? h('div', { className: 'pl-notice pl-notice-error', role: 'alert' }, error) : null,
+      discardOpen
+        ? h(
+            'div',
+            { className: 'pl-capture-confirm' },
+            h('p', { className: 'pl-capture-dup-title', role: 'alert' }, t('capture.discardTitle')),
+            h('p', { className: 'pl-capture-sub' }, t('capture.discardMessage')),
+            h(
+              'div',
+              { className: 'pl-capture-foot' },
+              h('button', { type: 'button', className: 'pl-btn', onClick: () => setDiscardOpen(false) }, t('capture.discardCancel')),
+              h(
+                'button',
+                { type: 'button', className: 'pl-btn pl-btn-danger', onClick: close },
+                t('capture.discardConfirm'),
+              ),
+            ),
+          )
+        : null,
+    );
+    footer = h(
+      'div',
+      { className: 'pl-capture-foot' },
+      h('span', { className: 'pl-capture-foot-hint' }, t('capture.saveShortcut')),
+      h('button', { type: 'button', className: 'pl-btn', onClick: requestClose, disabled: saving }, t('capture.cancel')),
+      h(
+        'button',
+        {
+          type: 'button',
+          className: 'pl-btn pl-btn-primary',
+          onClick: () => attemptSave(false),
+          disabled: saving,
+        },
+        saving ? t('capture.saving') : t('capture.save'),
+      ),
+    );
+  }
+
+  return h(
+    Modal,
+    {
+      title: t('capture.title'),
+      onClose: requestClose,
+      closeLabel: t('common.close'),
+      wide: true,
+      footer,
+      initialFocusRef: phase === 'edit' ? bodyRef : undefined,
+    },
+    h('div', { onKeyDown }, content),
+  );
+}
+
+    /* ===== end src/capture.js ===== */
     /* ===== src/full-panel.js ===== */
 /**
  * Full management panel — generated/embedded fragment (owner: panel-ui).
@@ -1691,12 +2625,18 @@ function validateAiReviewText(text) {
 const FULL_PANEL_DICT = {
   zh: {
     'full.header.subtitle': '本地保存 · 评分 · AI 辅助评价',
+    'full.capture.open': '快速收录',
+    'full.capture.openHint': '打开快速收录：可粘贴正文、补充来源说明并先放进收件箱',
+    'full.capture.unavailable': '快速收录暂不可用：当前面板没有接入收录入口',
+    'full.capture.failed': '快速收录打开失败：{message}',
     'full.aria.nav': '导航与筛选',
     'full.aria.list': '提示词列表',
     'full.aria.detail': '提示词详情',
     'full.aria.exportMenu': '导出菜单',
     'full.nav.title': '导航',
     'full.nav.all': '全部提示词',
+    'full.nav.inboxOption': '收件箱（{count}）',
+    'full.nav.inboxAria': '查看收件箱，{count} 条待整理',
     'full.nav.favorites': '收藏',
     'full.nav.recent': '最近使用',
     'full.nav.quality': '质量筛选',
@@ -1721,6 +2661,8 @@ const FULL_PANEL_DICT = {
     'full.list.noResults.title': '没有匹配的提示词',
     'full.list.noResults.body': '当前搜索或筛选条件下没有结果，可以清除筛选后再试。',
     'full.list.noSelection': '从列表中选择提示词查看详情',
+    'full.inbox.emptyTitle': '收件箱是空的',
+    'full.inbox.emptyBody': '快速收录的提示词会先进入收件箱；整理完成后在详情里点击“标记整理完成”即可移出。',
     'full.sort.label': '排序',
     'full.sort.default': '默认（置顶优先，最近更新）',
     'full.sort.updated': '最近更新',
@@ -1755,6 +2697,31 @@ const FULL_PANEL_DICT = {
     'full.detail.share': '分享',
     'full.detail.delete': '删除',
     'full.detail.missing': '提示词不存在或已被删除',
+    'full.focus.notFound': '要查看的提示词不存在或已被删除',
+    'full.organize.title': '整理状态',
+    'full.organize.state.inbox': '待整理',
+    'full.organize.state.organized': '已整理',
+    'full.organize.current': '当前状态：{state}',
+    'full.organize.markDone': '标记整理完成',
+    'full.organize.backToInbox': '重新移回收件箱',
+    'full.organize.hint': '整理状态与评分、标签、收藏相互独立；切换状态不会修改正文，也不会刷新更新时间。',
+    'full.organize.markedDone': '已标记为整理完成',
+    'full.organize.movedBack': '已移回收件箱',
+    'full.organize.unavailable': '当前版本不支持调整整理状态',
+    'full.organize.failed': '整理状态更新失败：{message}',
+    'full.capture.sourceTitle': '来源信息',
+    'full.capture.kindLine': '来源：{kind}',
+    'full.capture.kind.paste': '手动粘贴',
+    'full.capture.kind.composer': '输入框草稿',
+    'full.capture.kind.message': '对话消息',
+    'full.capture.kind.unknown': '未知来源',
+    'full.capture.capturedAt': '收录时间：{value}',
+    'full.capture.note': '来源说明：{note}',
+    'full.capture.openSession': '打开来源会话',
+    'full.capture.sessionOpened': '已打开来源会话',
+    'full.capture.sessionUnavailable': '当前环境不支持打开来源会话',
+    'full.capture.sessionFailed': '打开来源会话失败：{message}',
+    'full.capture.messageHint': '该条收录自对话消息；当前接口不支持定位到原消息，因此不提供跳转。',
     'full.detail.rateAfterUse': '给这条提示词评分',
     'full.detail.rateAfterUseHint': '刚复制过正文，记录你的使用体验（可选）',
     'full.detail.rateLater': '稍后',
@@ -1889,11 +2856,12 @@ const FULL_PANEL_DICT = {
     'full.import.replaceConfirm': '删除现有数据并导入',
     'full.import.noPlan': '尚未读取到可导入的内容',
     'full.import.fieldTitle': '字段说明',
-    'full.import.fieldCsv': 'CSV 列：title、body、tags、usage、rating、note；也接受中文表头（标题、正文、标签、使用场景、评分、评价备注）。',
+    'full.import.fieldCsv': 'CSV 列：title、body、tags、usage、rating、note、organize、sourceNote；也接受中文表头（标题、正文、标签、使用场景、评分、评价备注、整理状态、来源说明）。',
+    'full.import.fieldOrganize': 'organize 是整理状态（inbox 待整理 / organized 已整理，缺省或非法值按 organized 导入）；sourceNote 是来源说明，导入后作为“手动粘贴”来源的收录说明。CSV 不导出会话 ID，JSON 完整备份会保留全部来源元数据。',
     'full.import.fieldTags': '多标签用 JSON 数组编码，例如 ["写作","营销"]；正文与标签中的换行、引号按 RFC 4180 转义。',
     'full.import.fieldRating': '评分范围 1~5，支持 0.5 步进；留空表示未评分。CSV 导入的评分会先标记为“待复评”，因为无法恢复正文版本关联。',
     'full.import.fieldFormula': '导出时对以 = + - @ 开头的内容加前导单引号防止表格公式注入，导入时会自动还原；CSV 往返保留多行与引号。',
-    'full.import.fieldRoundtrip': 'CSV 用于交换；JSON 用于完整备份，保留评分与 AI 评价的正文版本关联。',
+    'full.import.fieldRoundtrip': 'CSV 用于交换；JSON 用于完整备份，保留评分与 AI 评价的正文版本关联，以及整理状态和来源元数据。',
     'full.share.title': '分享提示词',
     'full.share.hint': '分享内容只包含标题与正文，不包含个人评分备注或 AI 评价。',
     'full.share.copy': '复制正文',
@@ -1916,12 +2884,18 @@ const FULL_PANEL_DICT = {
   },
   en: {
     'full.header.subtitle': 'Local-first · ratings · AI-assisted review',
+    'full.capture.open': 'Quick capture',
+    'full.capture.openHint': 'Open quick capture: paste text, add a source note and save it to the inbox first',
+    'full.capture.unavailable': 'Quick capture is unavailable: this panel has no capture entry wired up',
+    'full.capture.failed': 'Opening quick capture failed: {message}',
     'full.aria.nav': 'Navigation and filters',
     'full.aria.list': 'Prompt list',
     'full.aria.detail': 'Prompt details',
     'full.aria.exportMenu': 'Export menu',
     'full.nav.title': 'Navigate',
     'full.nav.all': 'All prompts',
+    'full.nav.inboxOption': 'Inbox ({count})',
+    'full.nav.inboxAria': 'Show inbox, {count} to organize',
     'full.nav.favorites': 'Favorites',
     'full.nav.recent': 'Recently used',
     'full.nav.quality': 'Quality filter',
@@ -1946,6 +2920,8 @@ const FULL_PANEL_DICT = {
     'full.list.noResults.title': 'No matching prompts',
     'full.list.noResults.body': 'Nothing matches the current search or filters. Clear the filters and try again.',
     'full.list.noSelection': 'Select a prompt on the left to see its details',
+    'full.inbox.emptyTitle': 'The inbox is empty',
+    'full.inbox.emptyBody': 'Quick-captured prompts land in the inbox first. When you are done organizing one, choose "Mark as organized" in its details to move it out.',
     'full.sort.label': 'Sort',
     'full.sort.default': 'Default (pinned first, recently updated)',
     'full.sort.updated': 'Recently updated',
@@ -1980,6 +2956,31 @@ const FULL_PANEL_DICT = {
     'full.detail.share': 'Share',
     'full.detail.delete': 'Delete',
     'full.detail.missing': 'This prompt no longer exists',
+    'full.focus.notFound': 'The prompt to show no longer exists',
+    'full.organize.title': 'Organization',
+    'full.organize.state.inbox': 'To organize',
+    'full.organize.state.organized': 'Organized',
+    'full.organize.current': 'Current status: {state}',
+    'full.organize.markDone': 'Mark as organized',
+    'full.organize.backToInbox': 'Move back to inbox',
+    'full.organize.hint': 'Organization is independent of ratings, tags and favorites; switching it never changes the prompt text or its update time.',
+    'full.organize.markedDone': 'Marked as organized',
+    'full.organize.movedBack': 'Moved back to inbox',
+    'full.organize.unavailable': 'Changing the organization status is not available here',
+    'full.organize.failed': 'Updating the organization status failed: {message}',
+    'full.capture.sourceTitle': 'Source',
+    'full.capture.kindLine': 'Source: {kind}',
+    'full.capture.kind.paste': 'Manual paste',
+    'full.capture.kind.composer': 'Composer draft',
+    'full.capture.kind.message': 'Chat message',
+    'full.capture.kind.unknown': 'Unknown source',
+    'full.capture.capturedAt': 'Captured at: {value}',
+    'full.capture.note': 'Source note: {note}',
+    'full.capture.openSession': 'Open source session',
+    'full.capture.sessionOpened': 'Source session opened',
+    'full.capture.sessionUnavailable': 'Opening the source session is not available here',
+    'full.capture.sessionFailed': 'Opening the source session failed: {message}',
+    'full.capture.messageHint': 'Captured from a chat message; the current interface does not support locating the exact message, so no link is offered.',
     'full.detail.rateAfterUse': 'Rate this prompt',
     'full.detail.rateAfterUseHint': 'You just copied the text. Rate your experience (optional).',
     'full.detail.rateLater': 'Later',
@@ -2114,11 +3115,12 @@ const FULL_PANEL_DICT = {
     'full.import.replaceConfirm': 'Delete current data and import',
     'full.import.noPlan': 'No importable content has been read yet',
     'full.import.fieldTitle': 'Field guide',
-    'full.import.fieldCsv': 'CSV columns: title, body, tags, usage, rating, note; Chinese headers (标题/正文/标签/使用场景/评分/评价备注) are accepted too.',
+    'full.import.fieldCsv': 'CSV columns: title, body, tags, usage, rating, note, organize, sourceNote; Chinese headers (标题/正文/标签/使用场景/评分/评价备注/整理状态/来源说明) are accepted too.',
+    'full.import.fieldOrganize': 'organize is the organization status (inbox = to organize, organized = done; missing or invalid values import as organized); sourceNote is the source note, imported as the note of a "manual paste" source. CSV does not export session ids, while a full JSON backup keeps all source metadata.',
     'full.import.fieldTags': 'Multiple tags are encoded as a JSON array, e.g. ["writing","marketing"]; line breaks and quotes follow RFC 4180 escaping.',
     'full.import.fieldRating': 'Rating is 1 to 5 in steps of 0.5; leave empty for unrated. CSV ratings start as needs-re-rating because the body-version link cannot be restored.',
     'full.import.fieldFormula': 'Exports prefix values starting with = + - @ to prevent spreadsheet formula injection, and imports strip it again; CSV round-trips keep line breaks and quotes.',
-    'full.import.fieldRoundtrip': 'CSV is for exchange; JSON is the full backup that keeps rating and AI review version links.',
+    'full.import.fieldRoundtrip': 'CSV is for exchange; JSON is the full backup that keeps rating and AI review version links, plus organization and source metadata.',
     'full.share.title': 'Share prompt',
     'full.share.hint': 'Shared content contains only the title and prompt text, without the personal note or AI review.',
     'full.share.copy': 'Copy text',
@@ -2239,6 +3241,16 @@ const FULL_PANEL_CSS = [
   '.pl-file-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}',
   '.pl-share-actions{display:flex;flex-direction:column;gap:8px;margin:12px 0 0}',
   '.pl-share-actions .pl-btn{justify-content:flex-start}',
+  '.pl-badge{flex:none;display:inline-flex;align-items:center;padding:1px 7px;border-radius:999px;font-size:11px;line-height:1.65;font-weight:600;white-space:nowrap}',
+  '.pl-badge-inbox{background:color-mix(in srgb,var(--dsw-alias-state-warn-primary) 15%,transparent);color:var(--dsw-alias-state-warn-primary)}',
+  '.pl-list-item-head .pl-badge{margin-left:auto}',
+  '.pl-detail-head .pl-badge{margin-top:3px}',
+  '.pl-organize-state{flex:none;font-size:12px;font-weight:600;color:var(--dsw-alias-label-secondary)}',
+  '.pl-organize-state-inbox{color:var(--dsw-alias-state-warn-primary)}',
+  '.pl-capture-meta{margin:0 0 8px;font-size:12.5px;line-height:1.65;color:var(--dsw-alias-label-primary);overflow-wrap:anywhere}',
+  '.pl-capture-note{margin:0 0 8px;font-size:12px;line-height:1.65;color:var(--dsw-alias-label-secondary);white-space:pre-wrap;overflow-wrap:anywhere}',
+  '.pl-capture-actions{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin:10px 0 0}',
+  '.pl-capture-hint{margin:8px 0 0;font-size:11.5px;line-height:1.55;color:var(--dsw-alias-label-secondary)}',
 ].join('');
 
 const FP_AI_TIMEOUT_MS = 120000;
@@ -2305,6 +3317,21 @@ function fpDescribe(t, error) {
   return describeError(t, error);
 }
 
+/** Human-readable message for a thrown value / rejected promise. */
+function fpErrorText(error) {
+  if (error && typeof error.message === 'string' && error.message) return error.message;
+  if (typeof error === 'string' && error) return error;
+  return String(error === undefined || error === null ? '' : error) || 'unknown';
+}
+
+/** Translate a capture source kind, falling back for corrupted/unknown data. */
+function fpCaptureKindText(t, kind) {
+  const key = 'full.capture.kind.' + String(kind || '');
+  const text = t(key);
+  if (typeof text === 'string' && text !== key) return text;
+  return t('full.capture.kind.unknown');
+}
+
 /* ------------------------------------------------------------------ */
 /* Reusable bits                                                       */
 /* ------------------------------------------------------------------ */
@@ -2350,15 +3377,16 @@ function FPEmptyState(props) {
 /* ------------------------------------------------------------------ */
 
 function FPNav(props) {
-  const { t, data, view, quality, tagId, onView, onQuality, onTag, onManageTags } = props;
+  const { t, data, view, quality, tagId, inboxCount, onView, onQuality, onTag, onManageTags } = props;
   const tags = sortTags(data.tags);
-  const viewItem = (key, label) =>
+  const viewItem = (key, label, ariaLabel) =>
     h(
       'button',
       {
         type: 'button',
         className: 'pl-nav-item',
         'aria-pressed': view === key,
+        'aria-label': ariaLabel,
         onClick: () => onView(key),
       },
       h('span', { className: 'pl-nav-item-text' }, label),
@@ -2400,6 +3428,11 @@ function FPNav(props) {
       { className: 'pl-nav-group' },
       h('h2', { className: 'pl-nav-heading' }, t('full.nav.title')),
       viewItem('all', t('full.nav.all')),
+      viewItem(
+        'inbox',
+        t('full.nav.inboxOption', { count: inboxCount }),
+        t('full.nav.inboxAria', { count: inboxCount }),
+      ),
       viewItem('favorites', t('full.nav.favorites')),
       viewItem('recent', t('full.nav.recent')),
     ),
@@ -2474,6 +3507,9 @@ function FPPromptListItem(props) {
           )
         : null,
       h('span', { className: 'pl-list-title' }, prompt.title),
+      prompt.organize === 'inbox'
+        ? h('span', { className: 'pl-badge pl-badge-inbox' }, t('full.organize.state.inbox'))
+        : null,
     ),
     h(
       'span',
@@ -2495,7 +3531,9 @@ function FPPromptList(props) {
     t,
     data,
     prompts,
+    view,
     hasFilters,
+    hasExtraFilters,
     search,
     sort,
     selectedId,
@@ -2528,11 +3566,12 @@ function FPPromptList(props) {
       ),
     );
   } else if (prompts.length === 0) {
+    const inboxEmpty = view === 'inbox' && !hasExtraFilters;
     child.push(
       h(FPEmptyState, {
-        key: 'no-results',
-        title: t('full.list.noResults.title'),
-        body: t('full.list.noResults.body'),
+        key: inboxEmpty ? 'inbox-empty' : 'no-results',
+        title: t(inboxEmpty ? 'full.inbox.emptyTitle' : 'full.list.noResults.title'),
+        body: t(inboxEmpty ? 'full.inbox.emptyBody' : 'full.list.noResults.body'),
         actions: hasFilters
           ? [
               h(
@@ -2930,16 +3969,40 @@ function FPAiSection(props) {
 /* ------------------------------------------------------------------ */
 
 function FPDetail(props) {
-  const { t, locale, data, prompt, store, narrow, onBack, onEdit, onDelete, onShare, aiStatus, onRetryStatus } = props;
+  const {
+    t,
+    locale,
+    data,
+    prompt,
+    store,
+    narrow,
+    openSession,
+    onBack,
+    onEdit,
+    onDelete,
+    onShare,
+    aiStatus,
+    onRetryStatus,
+  } = props;
   const [rateAfterUse, setRateAfterUse] = React.useState(false);
   const [copyNotice, setCopyNotice] = React.useState(null);
   const [aiDeleteOpen, setAiDeleteOpen] = React.useState(false);
+  const [organizeNotice, setOrganizeNotice] = React.useState(null);
+  const [sourceNotice, setSourceNotice] = React.useState(null);
   const [bodyMode, setBodyMode] = useBodyRenderMode(store);
   const tags = tagsForPrompt(data, prompt);
   const localeId = fpActiveLocale(locale);
   const created = formatDateTime(prompt.createdAt, localeId);
   const updated = formatDateTime(prompt.updatedAt, localeId);
   const lastUsed = formatDateTime(prompt.lastUsedAt, localeId);
+  const inInbox = prompt.organize === 'inbox';
+  const organizeStateLabel = t(inInbox ? 'full.organize.state.inbox' : 'full.organize.state.organized');
+  const capture = prompt.capture && typeof prompt.capture === 'object' ? prompt.capture : null;
+  const captureKindLabel = capture ? fpCaptureKindText(t, capture.kind) : '';
+  const capturedAtText = capture ? formatDateTime(capture.at, localeId) : '';
+  const captureNote = capture && typeof capture.note === 'string' ? capture.note.trim() : '';
+  const captureSessionId = capture && typeof capture.sessionId === 'string' ? capture.sessionId : '';
+  const captureMessageId = capture && typeof capture.messageId === 'string' ? capture.messageId : '';
   const metaParts = [];
   if (created) metaParts.push(t('full.detail.created', { value: created }));
   if (updated) metaParts.push(t('full.detail.updated', { value: updated }));
@@ -2961,6 +4024,97 @@ function FPDetail(props) {
     store.setRating(prompt.id, stars);
     setRateAfterUse(false);
     setCopyNotice({ kind: 'success', text: t('full.rating.current') });
+  }
+
+  /* Organization status is independent metadata; store.setOrganize must keep
+   * updatedAt untouched. Guard for older store builds and show failures in
+   * place instead of touching the body. */
+  function changeOrganize() {
+    const next = inInbox ? 'organized' : 'inbox';
+    let result = null;
+    try {
+      if (typeof store.setOrganize === 'function') result = store.setOrganize(prompt.id, next);
+    } catch (error) {
+      setOrganizeNotice({
+        kind: 'error',
+        text: t('full.organize.failed', { message: fpErrorText(error) }),
+      });
+      return;
+    }
+    if (!result) {
+      setOrganizeNotice({ kind: 'error', text: t('full.organize.unavailable') });
+      return;
+    }
+    if (!result.ok) {
+      setOrganizeNotice({
+        kind: 'error',
+        text: t('full.organize.failed', { message: fpDescribe(t, result.error) }),
+      });
+      return;
+    }
+    setOrganizeNotice({
+      kind: 'success',
+      text: t(next === 'organized' ? 'full.organize.markedDone' : 'full.organize.movedBack'),
+    });
+  }
+
+  /* Source session jump is optional host plumbing: any failure is reported in
+   * place and never affects the prompt itself. */
+  function openSourceSession() {
+    if (!captureSessionId) return;
+    if (typeof openSession !== 'function') {
+      setSourceNotice({ kind: 'error', text: t('full.capture.sessionUnavailable') });
+      return;
+    }
+    let result;
+    try {
+      result = openSession(captureSessionId);
+    } catch (error) {
+      const message = fpErrorText(error);
+      setSourceNotice({
+        kind: 'error',
+        text:
+          message === 'navigation-unavailable'
+            ? t('full.capture.sessionUnavailable')
+            : t('full.capture.sessionFailed', { message }),
+      });
+      return;
+    }
+    if (result && typeof result.then === 'function') {
+      result.then(
+        (value) => {
+          if (value === false) {
+            setSourceNotice({ kind: 'error', text: t('full.capture.sessionUnavailable') });
+          } else if (value && value.ok === false) {
+            setSourceNotice({
+              kind: 'error',
+              text: t('full.capture.sessionFailed', { message: fpDescribe(t, value.error) }),
+            });
+          } else {
+            setSourceNotice({ kind: 'success', text: t('full.capture.sessionOpened') });
+          }
+        },
+        (error) => {
+          setSourceNotice({
+            kind: 'error',
+            text: t('full.capture.sessionFailed', { message: fpErrorText(error) }),
+          });
+        },
+      );
+      return;
+    }
+    if (result === false) {
+      setSourceNotice({ kind: 'error', text: t('full.capture.sessionUnavailable') });
+      return;
+    }
+    if (result && result.ok === false) {
+      setSourceNotice({
+        kind: 'error',
+        text: t('full.capture.sessionFailed', { message: fpDescribe(t, result.error) }),
+      });
+      return;
+    }
+    setSourceNotice({ kind: 'success', text: t('full.capture.sessionOpened') });
   }
 
   function aiGenerated(review, meta) {
@@ -2998,6 +4152,9 @@ function FPDetail(props) {
       'div',
       { className: 'pl-detail-head' },
       h('h2', { className: 'pl-detail-title' }, prompt.title),
+      inInbox
+        ? h('span', { className: 'pl-badge pl-badge-inbox' }, t('full.organize.state.inbox'))
+        : null,
       h(
         'div',
         { className: 'pl-detail-actions' },
@@ -3040,6 +4197,74 @@ function FPDetail(props) {
         ? h(TagChips, { tags, limit: 20 })
         : h('span', { className: 'pl-muted' }, t('full.detail.noTags')),
     ),
+    h(
+      'div',
+      { className: 'pl-detail-section' },
+      h(
+        'div',
+        { className: 'pl-section-head' },
+        h('h3', { className: 'pl-section-title pl-section-title-inline' }, t('full.organize.title')),
+        h(
+          'span',
+          { className: 'pl-organize-state' + (inInbox ? ' pl-organize-state-inbox' : '') },
+          t('full.organize.current', { state: organizeStateLabel }),
+        ),
+      ),
+      h('p', { className: 'pl-field-hint' }, t('full.organize.hint')),
+      h(
+        'div',
+        { className: 'pl-inline' },
+        h(
+          'button',
+          { type: 'button', className: 'pl-btn', onClick: changeOrganize },
+          t(inInbox ? 'full.organize.markDone' : 'full.organize.backToInbox'),
+        ),
+      ),
+      organizeNotice
+        ? h(FPLocalNotice, {
+            kind: organizeNotice.kind,
+            text: organizeNotice.text,
+            onDismiss: () => setOrganizeNotice(null),
+            dismissLabel: t('common.dismiss'),
+          })
+        : null,
+    ),
+    capture
+      ? h(
+          'div',
+          { className: 'pl-detail-section' },
+          h('h3', { className: 'pl-section-title' }, t('full.capture.sourceTitle')),
+          h('p', { className: 'pl-capture-meta' }, t('full.capture.kindLine', { kind: captureKindLabel })),
+          capturedAtText
+            ? h('p', { className: 'pl-capture-meta' }, t('full.capture.capturedAt', { value: capturedAtText }))
+            : null,
+          captureNote
+            ? h('p', { className: 'pl-capture-note' }, t('full.capture.note', { note: captureNote }))
+            : null,
+          captureSessionId
+            ? h(
+                'div',
+                { className: 'pl-capture-actions' },
+                h(
+                  'button',
+                  { type: 'button', className: 'pl-btn', onClick: openSourceSession },
+                  t('full.capture.openSession'),
+                ),
+              )
+            : null,
+          captureMessageId
+            ? h('p', { className: 'pl-capture-hint' }, t('full.capture.messageHint'))
+            : null,
+          sourceNotice
+            ? h(FPLocalNotice, {
+                kind: sourceNotice.kind,
+                text: sourceNotice.text,
+                onDismiss: () => setSourceNotice(null),
+                dismissLabel: t('common.dismiss'),
+              })
+            : null,
+        )
+      : null,
     copyNotice
       ? h(FPLocalNotice, {
           kind: copyNotice.kind,
@@ -3833,6 +5058,7 @@ function FPImportModal(props) {
         { className: 'pl-import-guide' },
         h('h4', { className: 'pl-import-guide-title' }, t('full.import.fieldTitle')),
         h('p', null, t('full.import.fieldCsv')),
+        h('p', null, t('full.import.fieldOrganize')),
         h('p', null, t('full.import.fieldTags')),
         h('p', null, t('full.import.fieldRating')),
         h('p', null, t('full.import.fieldFormula')),
@@ -3945,6 +5171,28 @@ function FullPanel(props) {
   const data = snap.data;
   const rootRef = React.useRef(null);
   const narrow = useNarrow(rootRef);
+  /* Optional host plumbing: quick-capture entry, focus requests raised by the
+   * capture dialog's "view" action, and source-session jumps. All nullable. */
+  const capture = props.capture && typeof props.capture.open === 'function' ? props.capture : null;
+  const openSession = typeof props.openSession === 'function' ? props.openSession : null;
+  const focus =
+    props.focus && typeof props.focus.getSnapshot === 'function' && typeof props.focus.subscribe === 'function'
+      ? props.focus
+      : null;
+  const subscribeFocus = React.useCallback(
+    (onChange) => (focus ? focus.subscribe(onChange) : () => {}),
+    [focus],
+  );
+  const readFocus = React.useCallback(() => (focus ? focus.getSnapshot() : null), [focus]);
+  const focusSnapshot = React.useSyncExternalStore(subscribeFocus, readFocus);
+  /* Accept both documented shapes: a bare prompt id, or {id, seq} (Lead's
+   * versioned request store). Anything else means "no request". */
+  const focusRequestId =
+    typeof focusSnapshot === 'string'
+      ? focusSnapshot
+      : focusSnapshot && typeof focusSnapshot.id === 'string'
+        ? focusSnapshot.id
+        : null;
   const initialPrefsRef = React.useRef(undefined);
   if (initialPrefsRef.current === undefined) initialPrefsRef.current = fpReadUiPrefs(store);
   const initialPrefs = initialPrefsRef.current || {};
@@ -3980,6 +5228,27 @@ function FullPanel(props) {
   React.useEffect(() => {
     if (tagId && !data.tags.some((tag) => tag.id === tagId)) setTagId(null);
   }, [tagId, data.tags]);
+
+  /* A capture "view" action asks the panel to reveal a prompt: consume the
+   * request, switch back to "all prompts", clear every filter and select it.
+   * Subscription cleanup is owned by useSyncExternalStore on unmount. */
+  React.useEffect(() => {
+    if (!focusRequestId) return;
+    if (focus && typeof focus.consume === 'function') {
+      try {
+        focus.consume();
+      } catch {
+        /* older focus stores: ignore */
+      }
+    }
+    setView('all');
+    setTagId(null);
+    setQuality('any');
+    setSearch('');
+    setSelectedId(focusRequestId);
+    const exists = data.prompts.some((prompt) => prompt.id === focusRequestId);
+    setFlash(exists ? null : { kind: 'error', text: t('full.focus.notFound') });
+  }, [focusRequestId]);
 
   /* AI service status is fetched once per panel mount and retried on demand. */
   const aiStatusSeq = React.useRef(0);
@@ -4056,7 +5325,9 @@ function FullPanel(props) {
 
   const selectedPrompt = selectedId ? data.prompts.find((prompt) => prompt.id === selectedId) || null : null;
   const prompts = selectPrompts(data, { view, tagId, quality, search }, sort);
+  const inboxCount = selectPrompts(data, { view: 'inbox' }, 'default').length;
   const hasFilters = view !== 'all' || Boolean(tagId) || quality !== 'any' || search.trim() !== '';
+  const hasExtraFilters = Boolean(tagId) || quality !== 'any' || search.trim() !== '';
   const tags = sortTags(data.tags);
   const sharePrompt = shareTarget ? data.prompts.find((prompt) => prompt.id === shareTarget) || null : null;
   const deletePromptObj = deleteTarget ? data.prompts.find((prompt) => prompt.id === deleteTarget) || null : null;
@@ -4066,6 +5337,15 @@ function FullPanel(props) {
     setTagId(null);
     setQuality('any');
     setSearch('');
+  }
+
+  function openCapture() {
+    if (!capture) return;
+    try {
+      capture.open({ text: '', source: { kind: 'paste' } });
+    } catch (error) {
+      setFlash({ kind: 'error', text: t('full.capture.failed', { message: fpErrorText(error) }) });
+    }
   }
 
   function openEditor(promptId) {
@@ -4188,6 +5468,18 @@ function FullPanel(props) {
       { className: 'pl-header-actions' },
       h(
         'button',
+        {
+          type: 'button',
+          className: 'pl-btn',
+          disabled: !capture,
+          title: capture ? t('full.capture.openHint') : t('full.capture.unavailable'),
+          'aria-disabled': capture ? undefined : 'true',
+          onClick: openCapture,
+        },
+        t('full.capture.open'),
+      ),
+      h(
+        'button',
         { type: 'button', className: 'pl-btn pl-btn-primary', onClick: () => openEditor(null) },
         t('full.list.new'),
       ),
@@ -4241,6 +5533,7 @@ function FullPanel(props) {
     view,
     quality,
     tagId,
+    inboxCount,
     onView: setView,
     onQuality: setQuality,
     onTag: setTagId,
@@ -4251,7 +5544,9 @@ function FullPanel(props) {
     t,
     data,
     prompts,
+    view,
     hasFilters,
+    hasExtraFilters,
     search,
     sort,
     selectedId,
@@ -4271,6 +5566,7 @@ function FullPanel(props) {
         prompt: selectedPrompt,
         store,
         narrow,
+        openSession,
         aiStatus,
         onRetryStatus: reloadAiStatus,
         onBack: () => setSelectedId(null),
@@ -4343,7 +5639,8 @@ function FullPanel(props) {
     /* ===== end src/full-panel.js ===== */
     /* ===== src/quick-picker.js ===== */
 /**
- * Composer quick picker — generated/embedded fragment (owner: quick-ui).
+ * Composer quick picker + quick-capture entries — generated/embedded fragment
+ * (owner: quick-ui).
  *
  * The entry button lives in the `conversation.input.right` slot; the picker
  * itself is a shared `Modal` (portalled to `document.body` by `Portal`, as the
@@ -4351,6 +5648,14 @@ function FullPanel(props) {
  * the only actions that count as "used"; inserting goes exclusively through
  * the shared `doInsert(inputActions, text)` helper (captureInsertion +
  * insertText, revision checked) and never replaces the whole draft or sends.
+ *
+ * Quick capture (DESIGN.md §9.3) adds three entry points that only ever publish
+ * a synchronous snapshot to the Lead-owned capture hub (`capture.open`):
+ * `PromptLibrarySaveDraftEntry` (composer toolbar, whole draft),
+ * `PromptLibraryMessageCaptureAction` (chat selection overlay) and the quick
+ * picker toolbar entries (empty paste capture / whole draft). They never write
+ * the draft, submit, read the clipboard or touch host DOM; the capture dialog
+ * owns editing, saving, duplicate checks and the "whole draft" degradation copy.
  *
  * Rules for this file (see DESIGN.md §1): plain script in the client factory
  * scope, no import/export statements, only functions and consts, all copy in
@@ -4364,11 +5669,23 @@ const QUICK_PICKER_CSS = [
   '.plq-entry:hover{background:color-mix(in srgb,var(--dsw-alias-label-secondary) 10%,transparent);color:var(--dsw-alias-label-primary)}',
   '.plq-entry:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}',
   '.plq-entry-label{color:var(--dsw-alias-label-primary)}',
+  '.plq-tip-wrap{display:inline-flex;align-items:center;min-width:0}',
+  '.plq-tip{position:fixed;z-index:10001;max-width:280px;padding:6px 9px;border-radius:8px;background:var(--dsw-alias-toast-bg,color-mix(in srgb,var(--dsw-alias-label-primary) 92%,transparent));color:var(--dsw-alias-toast-label,var(--dsw-alias-bg-base));font-size:12px;line-height:1.45;text-align:left;overflow-wrap:anywhere;box-shadow:0 6px 20px rgba(0,0,0,.2);pointer-events:none}',
+  '.plq-draft-entry{justify-content:center;width:30px;min-height:30px;padding:0}',
+  '.plq-draft-entry:disabled{opacity:.4;cursor:not-allowed}',
+  '.plq-draft-entry[disabled]{opacity:.55;cursor:not-allowed}',
+  '.plq-draft-entry[disabled]:hover{background:transparent;color:var(--dsw-alias-label-secondary)}',
+  '.plq-msg-capture{display:inline-flex;align-items:center;gap:5px;min-height:28px;padding:0 9px;border:.5px solid var(--dsw-alias-border-l1);border-radius:8px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font:inherit;font-size:12.5px;line-height:1;cursor:pointer;white-space:nowrap}',
+  '.plq-msg-capture:hover:not([disabled]){background:var(--dsw-alias-interactive-bg-hover,var(--dsw-alias-bg-layer-2))}',
+  '.plq-msg-capture:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}',
+  '.plq-msg-capture[disabled]{opacity:.55;cursor:not-allowed}',
   '.pl-dialog:has(.plq-shell){width:min(720px,100%)}',
   '.plq-shell{display:flex;flex-direction:column;gap:10px;min-height:0;width:100%;max-width:720px;margin:0 auto}',
-  '.plq-toolbar{display:flex;align-items:center;gap:10px}',
+  '.plq-toolbar{display:flex;align-items:center;flex-wrap:wrap;gap:10px}',
   '.plq-search{flex:1;min-width:0;min-height:32px}',
   '.plq-count{flex:none;font-size:12px;color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums;white-space:nowrap}',
+  '.plq-capture-actions{display:flex;align-items:center;gap:6px;margin-left:auto}',
+  '.plq-capture-btn{flex:none;display:inline-flex;align-items:center;gap:4px;min-height:30px;padding:0 8px;font-size:12.5px}',
   '.plq-strip{display:flex;align-items:center;flex-wrap:wrap;gap:8px 12px;padding:7px 10px;border:.5px solid transparent;border-radius:9px;font-size:12.5px;line-height:1.5}',
   '.plq-strip-info{border-color:var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-secondary)}',
   '.plq-strip-success{border-color:color-mix(in srgb,var(--dsw-alias-state-success-primary,#2f9e44) 40%,transparent);background:color-mix(in srgb,var(--dsw-alias-state-success-primary,#2f9e44) 10%,transparent);color:var(--dsw-alias-state-success-primary,#2f9e44)}',
@@ -4408,6 +5725,8 @@ const QUICK_PICKER_CSS = [
   '@media (max-width: 640px){',
   '.pl-dialog:has(.plq-shell){width:100%;border-radius:12px}',
   '.plq-shell{max-width:none}',
+  '.plq-toolbar{flex-wrap:wrap}',
+  '.plq-capture-actions{margin-left:0;width:100%;justify-content:flex-end}',
   '.plq-body{grid-template-columns:minmax(0,1fr);gap:10px}',
   '.plq-list{max-height:40vh}',
   '.plq-preview-col{border-left:0;border-top:.5px solid var(--dsw-alias-border-l1);padding-left:0;padding-top:10px}',
@@ -4418,7 +5737,7 @@ const QUICK_PICKER_CSS = [
 const QUICK_PICKER_DICT = {
   zh: {
     'quick.entry': '提示库',
-    'quick.entryTitle': '打开提示库快捷选择',
+    'quick.entryTitle': '提示库快捷选择：搜索、收藏、置顶与最近使用的提示词，可预览、复制或插入当前输入框',
     'quick.title': '提示库 · 快捷选择',
     'quick.search': '搜索提示词',
     'quick.searchPlaceholder': '搜索标题、正文或标签',
@@ -4449,10 +5768,21 @@ const QUICK_PICKER_DICT = {
     'quick.ratingLabel': '用后评分',
     'quick.insertDisabled': '当前 DSH 版本未提供安全插入接口，插入已禁用，请改用复制。',
     'quick.storageWarning': '本地存储不可用，本次改动可能无法保存。',
+    'quick.saveDraft': '存草稿',
+    'quick.saveDraftLabel': '保存为提示词',
+    'quick.saveDraftTitle': '把输入框中的整份草稿收录为提示词',
+    'quick.saveDraftEmpty': '输入框为空，暂无可保存的草稿',
+    'quick.saveDraftPanel': '保存草稿为提示词',
+    'quick.captureQuick': '快速收录',
+    'quick.captureQuickTitle': '打开快速收录，手动粘贴文本',
+    'quick.captureBusy': '收录弹层已打开，请先完成或关闭当前收录。',
+    'quick.captureUnavailable': '当前环境未提供快速收录功能。',
+    'quick.captureMessage': '收录为提示词',
+    'quick.captureMessageTitle': '把选中的对话文本收录为提示词',
   },
   en: {
     'quick.entry': 'Prompts',
-    'quick.entryTitle': 'Open the Prompt Library quick picker',
+    'quick.entryTitle': 'Prompt Library quick picker: search favorites, pins and recent prompts, then preview, copy or insert into the draft',
     'quick.title': 'Prompt Library · Quick picker',
     'quick.search': 'Search prompts',
     'quick.searchPlaceholder': 'Search titles, text or tags',
@@ -4483,6 +5813,17 @@ const QUICK_PICKER_DICT = {
     'quick.ratingLabel': 'Rate after use',
     'quick.insertDisabled': 'This DSH version exposes no safe insertion API, so inserting is disabled — use Copy instead.',
     'quick.storageWarning': 'Local storage is unavailable; changes in this session may not be saved.',
+    'quick.saveDraft': 'Save draft',
+    'quick.saveDraftLabel': 'Save as prompt',
+    'quick.saveDraftTitle': 'Save the whole composer draft as a prompt',
+    'quick.saveDraftEmpty': 'The composer is empty — nothing to save',
+    'quick.saveDraftPanel': 'Save draft as prompt',
+    'quick.captureQuick': 'Quick capture',
+    'quick.captureQuickTitle': 'Open quick capture to paste text manually',
+    'quick.captureBusy': 'A capture dialog is already open — finish or close it first.',
+    'quick.captureUnavailable': 'Quick capture is not available in this environment.',
+    'quick.captureMessage': 'Save as prompt',
+    'quick.captureMessageTitle': 'Save the selected conversation text as a prompt',
   },
 };
 
@@ -4724,6 +6065,255 @@ function QPPreview(props) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Quick capture entries (DESIGN.md §9.3)                              */
+/* ------------------------------------------------------------------ */
+
+/** Inbox/tray icon used by the capture entries; color comes from currentColor. */
+let QP_TIP_SEQUENCE = 0;
+
+/**
+ * Immediate hover/focus description. Native `title` tooltips wait about a
+ * second before showing, which felt slow in the composer toolbar; this renders
+ * a themed tooltip at once (portalled to the body, because the composer is its
+ * own containing block) and keeps keyboard focus users informed too.
+ */
+function QPHoverTip(props) {
+  const [open, setOpen] = React.useState(false);
+  const [coords, setCoords] = React.useState(null);
+  const wrapRef = React.useRef(null);
+  const tipRef = React.useRef(null);
+  const idRef = React.useRef(null);
+  if (idRef.current === null) {
+    QP_TIP_SEQUENCE += 1;
+    idRef.current = 'plq-tip-' + String(QP_TIP_SEQUENCE);
+  }
+  const label = typeof props.label === 'string' ? props.label : '';
+
+  React.useEffect(() => {
+    if (!open) return undefined;
+    const place = () => {
+      const anchor = wrapRef.current;
+      const tip = tipRef.current;
+      if (!anchor || !tip || typeof anchor.getBoundingClientRect !== 'function') return;
+      const rect = anchor.getBoundingClientRect();
+      const width = tip.offsetWidth || 200;
+      const height = tip.offsetHeight || 32;
+      const viewWidth = typeof window !== 'undefined' && window.innerWidth ? window.innerWidth : 800;
+      let left = rect.left + rect.width / 2 - width / 2;
+      left = Math.max(8, Math.min(left, viewWidth - width - 8));
+      let top = rect.top - height - 6;
+      if (top < 8) top = rect.bottom + 6;
+      setCoords({ left, top });
+    };
+    place();
+    const win = typeof window !== 'undefined' ? window : null;
+    const hide = () => setOpen(false);
+    if (win && typeof win.addEventListener === 'function') {
+      win.addEventListener('resize', hide);
+      win.addEventListener('scroll', hide, true);
+    }
+    return () => {
+      if (win && typeof win.removeEventListener === 'function') {
+        win.removeEventListener('resize', hide);
+        win.removeEventListener('scroll', hide, true);
+      }
+    };
+  }, [open]);
+
+  function show() {
+    if (!label) return;
+    setCoords(null);
+    setOpen(true);
+  }
+  function hide() {
+    setOpen(false);
+  }
+
+  return h(
+    'span',
+    {
+      ref: wrapRef,
+      className: 'plq-tip-wrap',
+      'data-hover-tip': '',
+      onMouseEnter: show,
+      onMouseLeave: hide,
+      onFocus: show,
+      onBlur: hide,
+      onClick: hide,
+    },
+    props.children,
+    open && label
+      ? h(
+          Portal,
+          null,
+          h(
+            'div',
+            {
+              ref: tipRef,
+              id: idRef.current,
+              role: 'tooltip',
+              className: 'plq-tip',
+              style:
+                coords === null
+                  ? { left: 0, top: 0, visibility: 'hidden' }
+                  : { left: String(coords.left) + 'px', top: String(coords.top) + 'px' },
+            },
+            label,
+          ),
+        )
+      : null,
+  );
+}
+
+function QPCaptureIcon(props) {
+  const size = (props && props.size) || 16;
+  return h(
+    'svg',
+    {
+      width: size,
+      height: size,
+      viewBox: '0 0 24 24',
+      fill: 'none',
+      'aria-hidden': 'true',
+      focusable: 'false',
+    },
+    /* A wide, rounded bookmark with a solid plus: conceptually a bookmark (the
+     * user's preference), optically sized and weighted to sit next to the
+     * library book icon without looking thinner or smaller. */
+    h('path', {
+      d: 'M5.3 6a1.8 1.8 0 0 1 1.8-1.8h9.8a1.8 1.8 0 0 1 1.8 1.8v14.4L12 16.6l-6.7 3.8V6Z',
+      stroke: 'currentColor',
+      strokeWidth: 1.7,
+      strokeLinejoin: 'round',
+      fill: 'none',
+    }),
+    h('path', {
+      d: 'M11.15 8.5h1.7v1.65h1.65v1.7h-1.65v1.65h-1.7v-1.65H9.5v-1.7h1.65V8.5Z',
+      fill: 'currentColor',
+      opacity: 0.9,
+    }),
+  );
+}
+
+/**
+ * Second composer entry (`conversation.input.right`, after the picker):
+ * saves the WHOLE composer draft into the capture dialog.
+ *
+ * Rules (DESIGN.md §9.3/§9.4): the draft is only ever read here — never
+ * written, submitted or replaced; there is no safe selection API for the
+ * composer, so only the full draft is offered and the dialog explains the
+ * degradation. `capture` is optional: without it the button stays disabled.
+ */
+function PromptLibrarySaveDraftEntry(props) {
+  const source = props || {};
+  const slotProps = source.slotProps || {};
+  const t = useT(source.locale);
+  const capture = source.capture || null;
+  const captureReady = Boolean(capture && typeof capture.open === 'function');
+  const draft = slotProps.input && typeof slotProps.input.draft === 'string' ? slotProps.input.draft : '';
+  const hasDraft = draft.trim() !== '';
+  const disabled = !captureReady || !hasDraft;
+  const title = !captureReady
+    ? t('quick.captureUnavailable')
+    : hasDraft
+      ? t('quick.saveDraftTitle')
+      : t('quick.saveDraftEmpty');
+
+  function onClick() {
+    if (!captureReady) return;
+    /* Snapshot the whole draft and the session id at click time; never mutate. */
+    const live = source.slotProps && source.slotProps.input ? source.slotProps.input : {};
+    const text = typeof live.draft === 'string' ? live.draft : '';
+    if (text.trim() === '') return;
+    const sessionId = source.slotProps ? source.slotProps.sessionId : undefined;
+    capture.open({ text, source: { kind: 'composer', sessionId } });
+  }
+
+  return h(
+    QPHoverTip,
+    { label: title },
+    h(
+      'button',
+      {
+        type: 'button',
+        className: 'plq-entry plq-draft-entry',
+        'aria-label': t('quick.saveDraftLabel'),
+        disabled,
+        'data-capture-entry': 'composer',
+        onClick,
+      },
+      h(QPCaptureIcon, { size: 17 }),
+    ),
+  );
+}
+
+/**
+ * Selection action rendered by the `conversation.chat.text-interaction`
+ * overlay: hands the selected message text to the capture dialog and closes
+ * the overlay. Only `trigger === 'selection'` is ours; nothing here touches
+ * the host DOM or writes to the conversation.
+ */
+function PromptLibraryMessageCaptureAction(props) {
+  const source = props || {};
+  const fallbackT = useT(source.locale);
+  const t = typeof source.t === 'function' ? source.t : fallbackT;
+  const capture = source.capture || null;
+  const captureReady = Boolean(capture && typeof capture.open === 'function');
+  const trigger = source.trigger;
+
+  function dismiss() {
+    if (typeof source.dismiss === 'function') source.dismiss();
+  }
+
+  function onPointerDown(event) {
+    if (event && typeof event.preventDefault === 'function') event.preventDefault();
+  }
+
+  function onClick() {
+    if (trigger !== 'selection' || !captureReady) {
+      dismiss();
+      return;
+    }
+    let text = null;
+    try {
+      text = typeof source.readText === 'function' ? source.readText() : null;
+    } catch {
+      text = null;
+    }
+    if (typeof text !== 'string' || text.trim() === '') {
+      dismiss();
+      return;
+    }
+    const opened = { text, source: { kind: 'message', sessionId: source.sessionId } };
+    try {
+      capture.open(opened);
+    } finally {
+      dismiss();
+    }
+  }
+
+  /* Other triggers (menu/link/...) are not ours: render nothing at all. */
+  if (trigger !== undefined && trigger !== null && trigger !== 'selection') return null;
+
+  const title = captureReady ? t('quick.captureMessageTitle') : t('quick.captureUnavailable');
+  return h(
+    'button',
+    {
+      type: 'button',
+      className: 'plq-msg-capture',
+      'aria-label': t('quick.captureMessage'),
+      title,
+      disabled: !captureReady,
+      'data-capture-entry': 'message',
+      onPointerDown,
+      onClick,
+    },
+    h(QPCaptureIcon, { size: 14 }),
+    h('span', null, t('quick.captureMessage')),
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /* Main component                                                      */
 /* ------------------------------------------------------------------ */
 
@@ -4751,6 +6341,13 @@ function PromptLibraryQuickEntry(props) {
   sessionRef.current = sessionId;
 
   const insertAvailable = hasInsertApi(slotProps.inputActions);
+
+  /* Optional Lead-injected capture hub; every entry degrades safely without it. */
+  const capture = (props && props.capture) || null;
+  const captureReady = Boolean(capture && typeof capture.open === 'function');
+  const composerDraft =
+    slotProps.input && typeof slotProps.input.draft === 'string' ? slotProps.input.draft : '';
+  const draftReady = composerDraft.trim() !== '';
 
   /* Switching conversations must never keep a stale overlay or selection. */
   React.useEffect(() => {
@@ -4890,24 +6487,64 @@ function PromptLibraryQuickEntry(props) {
     showNotice('info', 'quick.openPanelHint');
   }
 
+  /* Open the capture dialog and hand over; the dialog owns all editing/saving.
+   * `capture.open` returns false when a dialog is already open (request kept). */
+  function openCapture(payload) {
+    if (!captureReady) return false;
+    let opened;
+    try {
+      opened = capture.open(payload);
+    } catch {
+      opened = false;
+    }
+    return opened !== false;
+  }
+
+  function handleQuickCapture() {
+    if (!captureReady) return;
+    if (openCapture({ text: '', source: { kind: 'paste' } })) {
+      closePanel();
+      return;
+    }
+    showNotice('info', 'quick.captureBusy');
+  }
+
+  function handleSaveDraftCapture() {
+    if (!captureReady) return;
+    /* Snapshot the whole draft and session id at click time, read-only. */
+    if (composerDraft.trim() === '') return;
+    const payload = {
+      text: composerDraft,
+      source: { kind: 'composer', sessionId: slotProps.sessionId },
+    };
+    if (openCapture(payload)) {
+      closePanel();
+      return;
+    }
+    showNotice('info', 'quick.captureBusy');
+  }
+
   /* -------------------------- entry button -------------------------- */
 
   const entry = h(
     'span',
     { ref: entryRef, className: 'plq-entry-wrap' },
     h(
-      'button',
-      {
-        type: 'button',
-        className: 'plq-entry',
-        'aria-label': t('quick.entry'),
-        title: t('quick.entryTitle'),
-        'aria-haspopup': 'dialog',
-        'aria-expanded': open,
-        onClick: togglePanel,
-      },
-      h(LibraryIcon, { size: 16 }),
-      narrow ? null : h('span', { className: 'plq-entry-label' }, t('quick.entry')),
+      QPHoverTip,
+      { label: t('quick.entryTitle') },
+      h(
+        'button',
+        {
+          type: 'button',
+          className: 'plq-entry',
+          'aria-label': t('quick.entry'),
+          'aria-haspopup': 'dialog',
+          'aria-expanded': open,
+          onClick: togglePanel,
+        },
+        h(LibraryIcon, { size: 16 }),
+        narrow ? null : h('span', { className: 'plq-entry-label' }, t('quick.entry')),
+      ),
     ),
   );
 
@@ -5024,6 +6661,38 @@ function PromptLibraryQuickEntry(props) {
               onChange: onSearchChange,
             }),
             total > 0 ? h('span', { className: 'plq-count', role: 'status' }, t('quick.resultCount', { n: total })) : null,
+            captureReady
+              ? h(
+                  'div',
+                  { className: 'plq-capture-actions' },
+                  h(
+                    'button',
+                    {
+                      type: 'button',
+                      className: 'pl-btn pl-btn-ghost plq-capture-btn',
+                      'aria-label': t('quick.captureQuick'),
+                      title: t('quick.captureQuickTitle'),
+                      'data-quick-capture': 'paste',
+                      onClick: handleQuickCapture,
+                    },
+                    h(QPCaptureIcon, { size: 14 }),
+                    h('span', null, t('quick.captureQuick')),
+                  ),
+                  h(
+                    'button',
+                    {
+                      type: 'button',
+                      className: 'pl-btn pl-btn-ghost plq-capture-btn',
+                      'aria-label': t('quick.saveDraftLabel'),
+                      title: draftReady ? t('quick.saveDraftTitle') : t('quick.saveDraftEmpty'),
+                      disabled: !draftReady,
+                      'data-quick-capture': 'composer',
+                      onClick: handleSaveDraftCapture,
+                    },
+                    t('quick.saveDraftPanel'),
+                  ),
+                )
+              : null,
           ),
           snap && snap.status !== 'ready'
             ? h('p', { className: 'plq-hint' }, t('quick.storageWarning'))
@@ -5194,6 +6863,8 @@ function PromptLibraryQuickEntry(props) {
         if (full && typeof full === 'object') Object.assign(merged[lang], full);
         const quick = typeof QUICK_PICKER_DICT === 'object' && QUICK_PICKER_DICT !== null ? QUICK_PICKER_DICT[lang] : null;
         if (quick && typeof quick === 'object') Object.assign(merged[lang], quick);
+        const captureDict = typeof CAPTURE_DICT === 'object' && CAPTURE_DICT !== null ? CAPTURE_DICT[lang] : null;
+        if (captureDict && typeof captureDict === 'object') Object.assign(merged[lang], captureDict);
       }
       return merged;
     }
@@ -5475,17 +7146,22 @@ function PromptLibraryQuickEntry(props) {
         },
 
         createPrompt(input) {
-          const valid = validatePromptInput(input || {});
+          const source = input || {};
+          const valid = validatePromptInput(source);
           if (!valid.ok) return fail(valid.code);
           const prompt = createPrompt({
             id: newId('p'),
-            title: (input || {}).title,
-            body: (input || {}).body,
-            usage: (input || {}).usage,
-            tagIds: validateTagsInput((input || {}).tagIds),
+            title: source.title,
+            body: source.body,
+            usage: source.usage,
+            tagIds: validateTagsInput(source.tagIds),
+            organize: source.organize,
+            capture: source.capture,
             now: now(),
           });
-          return commit({ ...data, prompts: data.prompts.concat([prompt]) });
+          const committed = commit({ ...data, prompts: data.prompts.concat([prompt]) });
+          if (!committed.ok) return committed;
+          return { ok: true, prompt };
         },
         updatePrompt(id, input) {
           const valid = validatePromptInput(input || {});
@@ -5510,6 +7186,10 @@ function PromptLibraryQuickEntry(props) {
         setFlag(id, key, value) {
           if (key !== 'favorite' && key !== 'pinned') return fail('INVALID_DATA');
           return mutatePrompt(id, (prompt) => setPromptFlag(prompt, key, Boolean(value)));
+        },
+        setOrganize(id, status) {
+          if (typeof validateOrganize !== 'function' || validateOrganize(status) === undefined) return fail('INVALID_DATA');
+          return mutatePrompt(id, (prompt) => setOrganize(prompt, status));
         },
         setRating(id, stars) {
           if (stars === null || stars === undefined) {
@@ -5655,6 +7335,50 @@ function PromptLibraryQuickEntry(props) {
           } catch {
             /* purely a convenience preference; ignore quota/blocked storage */
           }
+        },
+      };
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Cross-surface focus requests (e.g. capture success -> open detail)  */
+    /* ------------------------------------------------------------------ */
+
+    function createFocusRequestStore() {
+      const listeners = new Set();
+      let requested = null;
+      let sequence = 0;
+      let snapshot = { id: null, seq: 0 };
+      const emit = () => {
+        sequence += 1;
+        snapshot = { id: requested, seq: sequence };
+        for (const listener of Array.from(listeners)) {
+          try {
+            listener();
+          } catch (error) {
+            /* ignore a broken subscriber */
+          }
+        }
+      };
+      return {
+        getSnapshot() {
+          return snapshot;
+        },
+        subscribe(listener) {
+          if (typeof listener !== 'function') return () => {};
+          listeners.add(listener);
+          return () => listeners.delete(listener);
+        },
+        request(id) {
+          if (typeof id !== 'string' || !id) return;
+          requested = id;
+          emit();
+        },
+        consume() {
+          if (requested === null) return null;
+          const id = requested;
+          requested = null;
+          emit();
+          return id;
         },
       };
     }
@@ -6717,7 +8441,7 @@ function PromptLibraryQuickEntry(props) {
       if (!doc || !doc.head) return () => {};
       const style = doc.createElement('style');
       style.setAttribute('data-dsh-plugin', PANEL_ID);
-      style.textContent = BASE_CSS + String(typeof FULL_PANEL_CSS === 'string' ? FULL_PANEL_CSS : '') + String(typeof QUICK_PICKER_CSS === 'string' ? QUICK_PICKER_CSS : '');
+      style.textContent = BASE_CSS + String(typeof CAPTURE_CSS === 'string' ? CAPTURE_CSS : '') + String(typeof FULL_PANEL_CSS === 'string' ? FULL_PANEL_CSS : '') + String(typeof QUICK_PICKER_CSS === 'string' ? QUICK_PICKER_CSS : '');
       doc.head.appendChild(style);
       return () => {
         try {
@@ -6779,6 +8503,24 @@ function PromptLibraryQuickEntry(props) {
       });
       ctx.effect(() => () => store.dispose(), 'prompt-library: store');
 
+      const capture = createCaptureHub();
+      const focus = createFocusRequestStore();
+      const captureInteractionId = 'prompt-library-capture';
+      /* The two entry components live in the quick-picker fragment; tolerate the
+       * fragment not yet defining them while the bundle is assembled. */
+      const SaveDraftEntry =
+        typeof PromptLibrarySaveDraftEntry === 'function' ? PromptLibrarySaveDraftEntry : () => null;
+      const MessageCaptureAction =
+        typeof PromptLibraryMessageCaptureAction === 'function' ? PromptLibraryMessageCaptureAction : () => null;
+
+      function openSourceSession(sessionId) {
+        const uiWorkspace = getService(ctx, 'uiWorkspace');
+        if (!uiWorkspace || typeof uiWorkspace.openSession !== 'function') {
+          throw new Error('navigation-unavailable');
+        }
+        uiWorkspace.openSession(sessionId);
+      }
+
       ctx.effect(() => installStyles(), 'prompt-library: styles');
 
       ctx.effect(() => {
@@ -6819,7 +8561,14 @@ function PromptLibraryQuickEntry(props) {
             name: 'main',
             key: PANEL_ID,
           },
-          () => h(FullPanel, { store, locale }),
+          (slotProps) =>
+            h(
+              FullPanel,
+              Object.assign(
+                { store, locale, capture, focus, openSession: openSourceSession },
+                slotProps || {},
+              ),
+            ),
         ),
       );
 
@@ -6833,12 +8582,87 @@ function PromptLibraryQuickEntry(props) {
           (slotProps) =>
             h(QuickPickerSlot, {
               store,
+              capture,
               locale,
               slotProps: slotProps || {},
               layout: getService(ctx, 'layout'),
             }),
         ),
       );
+
+      ctx.slots.inject('conversation.input.right', () =>
+        ctx.slots.register(
+          {
+            name: 'conversation.input.right',
+            id: 'prompt-library-save-draft',
+            order: 21,
+          },
+          (slotProps) =>
+            h(SaveDraftEntry, {
+              store,
+              capture,
+              locale,
+              slotProps: slotProps || {},
+            }),
+        ),
+      );
+
+      ctx.slots.inject('shell.overlay', () =>
+        ctx.slots.register(
+          {
+            name: 'shell.overlay',
+            id: 'prompt-library-capture',
+            locale: NS,
+            inject: () => ({
+              capture,
+              store,
+              focus,
+              getLayout: () => getService(ctx, 'layout'),
+              locale,
+            }),
+          },
+          PromptLibraryCaptureHost,
+        ),
+      );
+
+      ctx.inject(['uiConversation'], (uiCtx) => {
+        const uiConversation = getService(uiCtx, 'uiConversation') || getService(ctx, 'uiConversation');
+        if (
+          !uiConversation ||
+          !uiConversation.interactions ||
+          typeof uiConversation.interactions.register !== 'function'
+        ) {
+          return;
+        }
+        ctx.effect(
+          () =>
+            uiConversation.interactions.register({
+              id: captureInteractionId,
+              onInteraction(request) {
+                try {
+                  if (!request || request.trigger !== 'selection') return;
+                  const text = typeof request.readText === 'function' ? request.readText() : null;
+                  if (typeof text !== 'string' || text.trim() === '') return;
+                  request.open();
+                } catch (error) {
+                  /* a failed selection read just leaves the surface closed */
+                }
+              },
+            }),
+          'prompt-library: message text capture interaction',
+        );
+        ctx.slots.inject('conversation.chat.text-interaction', () =>
+          ctx.slots.register(
+            {
+              name: 'conversation.chat.text-interaction',
+              key: captureInteractionId,
+              locale: NS,
+              inject: () => ({ capture, locale }),
+            },
+            MessageCaptureAction,
+          ),
+        );
+      });
     }
 
     return { inject: ['slots', 'locale'], apply };

@@ -18,10 +18,14 @@ export const AI_REVIEW_MAX_CHARS = 200
 export const RATING_MIN = 1
 export const RATING_MAX = 5
 export const RATING_STEP = 0.5
-export const VIEWS = ['all', 'favorites', 'recent']
+export const VIEWS = ['all', 'inbox', 'favorites', 'recent']
 export const QUALITY_FILTERS = ['any', 'rated4', 'rated3', 'unrated', 'stale']
 export const SORTS = ['default', 'updated', 'recent', 'ratingDesc', 'ratingAsc']
-export const CSV_HEADERS = ['title', 'body', 'tags', 'usage', 'rating', 'note']
+/** Organize (triage) status of a prompt; unrelated to rating/favorite/pin. */
+export const ORGANIZE_STATES = ['inbox', 'organized']
+/** Where a quickly captured prompt came from. */
+export const CAPTURE_KINDS = ['paste', 'composer', 'message']
+export const CSV_HEADERS = ['title', 'body', 'tags', 'usage', 'rating', 'note', 'organize', 'sourceNote']
 export const CSV_HEADER_ALIASES = {
   '标题': 'title',
   '正文': 'body',
@@ -31,6 +35,9 @@ export const CSV_HEADER_ALIASES = {
   '评价备注': 'note',
   '个人评分': 'rating',
   '个人评价备注': 'note',
+  '整理状态': 'organize',
+  '来源说明': 'sourceNote',
+  '来源': 'sourceNote',
 }
 
 /* ------------------------------------------------------------------------- */
@@ -217,6 +224,32 @@ export function normalizeStars(value) {
   return isValidRating(value) ? value : null
 }
 
+/** Legal organize status, or `undefined` when `value` is not one of them. */
+export function validateOrganize(value) {
+  return ORGANIZE_STATES.includes(value) ? value : undefined
+}
+
+/**
+ * Clean quick-capture metadata. Illegal structure yields `null` (`kind` must be
+ * one of `CAPTURE_KINDS` and `at` a finite timestamp); optional string fields
+ * are trimmed, empty ones dropped. Always returns a new object, never mutates
+ * `raw`.
+ */
+export function normalizeCapture(raw) {
+  if (raw === null || raw === undefined) return null
+  if (!isRecord(raw)) return null
+  if (!CAPTURE_KINDS.includes(raw.kind)) return null
+  if (typeof raw.at !== 'number' || !Number.isFinite(raw.at)) return null
+  const capture = { kind: raw.kind, at: raw.at }
+  const sessionId = typeof raw.sessionId === 'string' ? raw.sessionId.trim() : ''
+  if (sessionId) capture.sessionId = sessionId
+  const messageId = typeof raw.messageId === 'string' ? raw.messageId.trim() : ''
+  if (messageId) capture.messageId = messageId
+  const note = typeof raw.note === 'string' ? raw.note.trim() : ''
+  if (note) capture.note = note
+  return capture
+}
+
 /** Predictable prompt id for tests and deterministic fixtures. */
 export function makePromptId(prefix, seq) {
   const head = typeof prefix === 'string' && prefix.trim() ? prefix.trim() : 'p'
@@ -271,6 +304,8 @@ export function normalizePrompt(raw, options) {
     lastUsedAt: timestampOrNull(input.lastUsedAt),
     useCount: typeof input.useCount === 'number' && Number.isInteger(input.useCount) && input.useCount >= 0 ? input.useCount : 0,
     aiReview: copyAiReview(input.aiReview),
+    organize: validateOrganize(input.organize) || 'organized',
+    capture: normalizeCapture(input.capture),
   }
 }
 
@@ -369,6 +404,10 @@ export function normalizeState(raw, options) {
       return invalid('第 ' + (index + 1) + ' 条提示词缺少正文')
     }
     const prompt = normalizePrompt(item, { tagIds, now })
+    // Forward-compatible v1 fields: absent (legacy) or invalid values are
+    // defaulted instead of failing, but count as a migration.
+    if (item.organize === undefined || validateOrganize(item.organize) === undefined) migrated = true
+    if (item.capture === undefined || (item.capture !== null && normalizeCapture(item.capture) === null)) migrated = true
     if (promptIds.has(prompt.id)) {
       prompt.id = makeId('p')
       warnings.push('PROMPT_ID_DUPLICATE')
@@ -407,6 +446,112 @@ export function sanitizeTagIds(ids, knownTagIds) {
     result.push(id)
   }
   return result
+}
+
+/* ------------------------------------------------------------------------- */
+/* Quick capture helpers                                                     */
+/* ------------------------------------------------------------------------- */
+
+/** Default max visible characters of an auto-suggested capture title. */
+const CAPTURE_TITLE_MAX_CHARS = 40
+
+/** Leading Markdown block markers stripped from the first captured line. */
+const CAPTURE_TITLE_MARKER = /^(?:(?:#{1,6}[ \t]+)|(?:>[ \t]+)|(?:[-*+][ \t]+)|(?:\d+[.)][ \t]+))+/u
+
+/** First `maxVisible` visible code points of `text` (whitespace passes through free). */
+function visiblePrefix(text, maxVisible) {
+  let visible = 0
+  let result = ''
+  for (const char of Array.from(text)) {
+    if (!/\s/u.test(char)) {
+      if (visible >= maxVisible) break
+      visible += 1
+    }
+    result += char
+  }
+  return result
+}
+
+/**
+ * Truncate to at most `maxChars` visible code points in total. Over-long text
+ * keeps `maxChars - 1` visible characters and appends '…' (the ellipsis is a
+ * visible character, so the result never exceeds the budget); text that already
+ * fits is returned unchanged without an ellipsis.
+ */
+function truncateVisibleText(text, maxChars) {
+  let visible = 0
+  for (const char of Array.from(text)) {
+    if (!/\s/u.test(char)) {
+      visible += 1
+      if (visible > maxChars) return visiblePrefix(text, maxChars - 1).replace(/\s+$/u, '') + '…'
+    }
+  }
+  return text
+}
+
+/**
+ * Suggest a capture title from the body: first non-empty line, leading Markdown
+ * markers stripped, ends trimmed, internal whitespace collapsed to one space,
+ * then truncated to at most `maxChars` (default 40) visible characters in
+ * total, ending with '…' when the content had to be cut. Falls back to the raw
+ * trimmed line when stripping leaves nothing and to `''` when the body has no
+ * non-empty line. Never modifies `body`.
+ */
+export function suggestCaptureTitle(body, maxChars) {
+  const text = typeof body === 'string' ? body : ''
+  let line
+  for (const candidate of text.split('\n')) {
+    if (candidate.trim() !== '') {
+      line = candidate
+      break
+    }
+  }
+  if (line === undefined) return ''
+  const trimmedStart = line.replace(/^[ \t]+/u, '')
+  let title = trimmedStart.replace(CAPTURE_TITLE_MARKER, '').trim()
+  if (!title) title = line.trim()
+  if (!title) return ''
+  title = title.replace(/\s+/gu, ' ')
+  const limit =
+    typeof maxChars === 'number' && Number.isFinite(maxChars) && maxChars >= 1
+      ? Math.floor(maxChars)
+      : CAPTURE_TITLE_MAX_CHARS
+  return truncateVisibleText(title, limit)
+}
+
+/** Duplicate comparison form: unify newlines, then trim the ends only. */
+function normalizeCaptureBody(body) {
+  return stringOr(body, '').replace(/\r\n?/g, '\n').trim()
+}
+
+/**
+ * Find existing prompts whose body equals a capture candidate.
+ *
+ * - `exact`: body strings are identical.
+ * - `near`: equal after newline normalization (`\r\n?` -> `\n`) and trimming
+ *   the ends, but not identical. Internal whitespace/indentation and case
+ *   differences are never duplicates; only `body` is compared.
+ *
+ * Pure: `data` is only read and the returned arrays hold stored prompts.
+ *
+ * @returns {{exact: object[], near: object[]}}
+ */
+export function findCaptureDuplicates(data, body) {
+  const target = typeof body === 'string' ? body : ''
+  const prompts = Array.isArray(data && data.prompts) ? data.prompts : []
+  const normalizedTarget = normalizeCaptureBody(target)
+  const exact = []
+  const near = []
+  for (const prompt of prompts) {
+    if (!isRecord(prompt)) continue
+    const existing = stringOr(prompt.body, '')
+    if (existing === target) {
+      exact.push(prompt)
+      continue
+    }
+    if (normalizeCaptureBody(existing) === normalizedTarget) near.push(prompt)
+  }
+  return { exact, near }
 }
 
 /* ------------------------------------------------------------------------- */
@@ -536,6 +681,7 @@ export function tagUsageCount(data, tagId) {
 
 /** View membership test. */
 export function matchesView(prompt, view) {
+  if (view === 'inbox') return Boolean(prompt && prompt.organize === 'inbox')
   if (view === 'favorites') return Boolean(prompt && prompt.favorite)
   if (view === 'recent') return Boolean(prompt && typeof prompt.lastUsedAt === 'number' && Number.isFinite(prompt.lastUsedAt))
   return true
@@ -736,6 +882,8 @@ export function createPrompt(input) {
     lastUsedAt: null,
     useCount: 0,
     aiReview: null,
+    organize: validateOrganize(source.organize) || 'organized',
+    capture: normalizeCapture(source.capture),
   }
 }
 
@@ -743,6 +891,9 @@ export function createPrompt(input) {
  * Apply a content/tag edit. `title`/`body`/`usage` changes refresh updatedAt;
  * only a body change increments bodyVersion (which makes an existing rating
  * stale while keeping its stars/note/version association for display).
+ * `organize`/`capture` are independent metadata: they are preserved unless
+ * explicitly patched and never refresh updatedAt (`capture.at` is immutable on
+ * ordinary edits).
  */
 export function updatePrompt(prompt, updates, now) {
   const base = normalizePrompt(prompt)
@@ -752,6 +903,12 @@ export function updatePrompt(prompt, updates, now) {
   if (patch.body !== undefined) next.body = stringOr(patch.body, '')
   if (patch.usage !== undefined) next.usage = stringOr(patch.usage, '')
   if (patch.tagIds !== undefined) next.tagIds = sanitizeTagIds(patch.tagIds)
+  if (patch.organize !== undefined) next.organize = validateOrganize(patch.organize) || base.organize
+  if (patch.capture !== undefined) {
+    const nextCapture = normalizeCapture(patch.capture)
+    // `null` explicitly clears; an illegal object keeps the existing metadata.
+    next.capture = nextCapture === null && patch.capture !== null ? base.capture : nextCapture
+  }
   const contentChanged = next.title !== base.title || next.body !== base.body || next.usage !== base.usage
   if (next.body !== base.body) next.bodyVersion = promptBodyVersion(base) + 1
   if (contentChanged) next.updatedAt = resolveNow(now)
@@ -771,6 +928,18 @@ export function setPromptFlag(prompt, key, value) {
   const next = { ...base }
   next[key] = value === true
   return next
+}
+
+/**
+ * Set the organize status ('inbox' | 'organized'). Returns a new prompt and,
+ * like the other triage flags, does not refresh updatedAt; an illegal status
+ * leaves the prompt unchanged.
+ */
+export function setOrganize(prompt, status) {
+  const base = normalizePrompt(prompt)
+  const organize = validateOrganize(status)
+  if (!organize) return base
+  return { ...base, organize }
 }
 
 /** Set or clear the personal rating (null clears stars, keeps note). */
@@ -948,6 +1117,7 @@ export function toCsv(data, promptIds) {
       .map((tagId) => nameById.get(tagId))
       .filter((name) => typeof name === 'string' && name)
     const rating = normalizeStars(prompt.score && prompt.score.stars)
+    const capture = normalizeCapture(prompt.capture)
     lines.push(
       [
         csvEscapeField(stringOr(prompt.title, '')),
@@ -956,6 +1126,9 @@ export function toCsv(data, promptIds) {
         csvEscapeField(stringOr(prompt.usage, '')),
         csvEscapeField(ratingToCsvField(rating)),
         csvEscapeField(stringOr(prompt.score && prompt.score.note, '')),
+        csvEscapeField(validateOrganize(prompt.organize) || 'organized'),
+        // Only the user-facing source note is exported; sessionId/messageId stay in JSON backups.
+        csvEscapeField(capture ? capture.note || '' : ''),
       ].join(','),
     )
   }
@@ -1044,11 +1217,14 @@ export function parseCsv(text) {
   const warnings = []
   const seenColumns = new Set()
   const columnIndex = new Map()
+  // Canonical headers are matched case-insensitively (`sourceNote` -> `sourcenote`).
+  const canonicalHeaderByLower = new Map()
+  for (const header of CSV_HEADERS) canonicalHeaderByLower.set(header.toLowerCase(), header)
   for (let cellIndex = 0; cellIndex < headerCells.length; cellIndex += 1) {
     const rawHeader = headerCells[cellIndex].trim()
     if (!rawHeader) continue
     const lowered = rawHeader.toLowerCase()
-    const canonical = CSV_HEADER_ALIASES[lowered] || (CSV_HEADERS.includes(lowered) ? lowered : '')
+    const canonical = CSV_HEADER_ALIASES[lowered] || canonicalHeaderByLower.get(lowered) || ''
     if (!canonical) {
       warnings.push('UNKNOWN_COLUMN:' + rawHeader)
       continue
@@ -1082,6 +1258,8 @@ export function parseCsv(text) {
       usage: read('usage'),
       rating: read('rating'),
       note: read('note'),
+      organize: read('organize'),
+      sourceNote: read('sourceNote'),
       line: record.line,
     })
   }
@@ -1095,7 +1273,9 @@ function duplicateKey(title, body) {
 
 /**
  * Build an import preview: new prompts (ids/tagIds assigned), new tag objects,
- * per-row duplicates/invalids, and counts. Pure: `data` is not modified.
+ * per-row duplicates/invalids, and counts. Organize defaults to 'organized'
+ * and a non-empty source note becomes paste-capture metadata. Pure: `data` is
+ * not modified.
  *
  * @param {Array} rows rows produced by `parseCsv`
  * @param {object} data current data root
@@ -1201,6 +1381,12 @@ export function validateCsvRows(rows, data, now, makeId) {
     }
     importDuplicateKeys.add(key)
 
+    // Imported rows default to 'organized' (old CSV files have no organize
+    // column); a non-empty source note becomes paste-capture metadata. The
+    // import duplicate rule still compares title + body only.
+    const organize = validateOrganize(stringOr(row.organize, '').trim()) || 'organized'
+    const sourceNote = stringOr(row.sourceNote, '').trim()
+
     const tagIds = []
     for (const name of tagNames) {
       const tagId = resolveTagId(name)
@@ -1216,6 +1402,8 @@ export function validateCsvRows(rows, data, now, makeId) {
       usage: stringOr(row.usage, ''),
       tagIds,
       now: stamp,
+      organize,
+      capture: sourceNote ? { kind: 'paste', at: stamp, note: sourceNote } : null,
     })
     prompt.score = {
       stars,
@@ -1342,6 +1530,24 @@ function validateBackupPrompt(prompt, knownTagIds, index) {
     if (!isRecord(review.input)) return { code: 'INVALID_DATA', message: 'aiReview.input 缺失' }
     if (typeof review.input.title !== 'string' || typeof review.input.body !== 'string' || typeof review.input.usage !== 'string') {
       return { code: 'INVALID_DATA', message: 'aiReview.input 必须包含 title/body/usage 字符串' }
+    }
+  }
+  // Forward-compatible v1 fields (quick capture). Absent means a legacy
+  // backup (defaulted to 'organized'/null); present values are validated
+  // strictly so a damaged file is rejected instead of silently rewritten.
+  if (prompt.organize !== undefined && !ORGANIZE_STATES.includes(prompt.organize)) {
+    return { code: 'INVALID_DATA', message: 'organize 必须是 inbox 或 organized' }
+  }
+  if (prompt.capture !== undefined && prompt.capture !== null) {
+    if (!isRecord(prompt.capture)) return { code: 'INVALID_DATA', message: 'capture 必须是对象或 null' }
+    if (!CAPTURE_KINDS.includes(prompt.capture.kind)) return { code: 'INVALID_DATA', message: 'capture.kind 不合法' }
+    if (typeof prompt.capture.at !== 'number' || !Number.isFinite(prompt.capture.at)) {
+      return { code: 'INVALID_DATA', message: 'capture.at 必须是时间戳' }
+    }
+    for (const key of ['sessionId', 'messageId', 'note']) {
+      if (prompt.capture[key] !== undefined && typeof prompt.capture[key] !== 'string') {
+        return { code: 'INVALID_DATA', message: 'capture.' + key + ' 必须是字符串' }
+      }
     }
   }
   if (Array.isArray(prompt.tagIds)) {

@@ -194,6 +194,49 @@ function aiStatusResponse(overrides = {}) {
   };
 }
 
+/** Hand-rolled focus request store: same shape as the shared client helper. */
+function makeFocusStore(initial = null) {
+  let requested = typeof initial === 'string' ? initial : null;
+  let sequence = 0;
+  const listeners = new Set();
+  const emit = () => {
+    sequence += 1;
+    for (const listener of Array.from(listeners)) listener();
+  };
+  return {
+    getSnapshot: () => ({ id: requested, seq: sequence }),
+    subscribe(listener) {
+      if (typeof listener !== 'function') return () => {};
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    request(id) {
+      requested = id;
+      emit();
+    },
+    consume() {
+      const id = requested;
+      requested = null;
+      emit();
+      return id;
+    },
+    current: () => requested,
+  };
+}
+
+/** Navigation button by its accessible label (nav items carry counts). */
+function navItemByAria(h, label) {
+  return h.all('button').find(
+    (node) =>
+      String(node.props.className || '').includes('pl-nav-item') && node.props['aria-label'] === label,
+  );
+}
+
+/** A button whose visible text equals the active dictionary string. */
+function buttonByText(h, label) {
+  return h.all('button').find((node) => h.text(node).trim() === label);
+}
+
 /* ------------------------------------------------------------------ */
 /* 1. Empty / first-use state, storage untouched, dictionary parity   */
 /* ------------------------------------------------------------------ */
@@ -987,13 +1030,13 @@ test('export menu downloads a dated JSON backup, the CSV and the CSV template', 
   const csvText = await lastDownloadText();
   const csvName = h.download()[h.download().length - 1].filename;
   assert.match(csvName, /^prompt-library-\d{8}\.csv$/);
-  assert.match(csvText, /^title,body,tags,usage,rating,note\r?\n/);
+  assert.match(csvText, /^title,body,tags,usage,rating,note,organize,sourceNote\r?\n/);
   assert.match(csvText, /代码审查助手/);
 
   h.clickButton('导出');
   h.clickButton('CSV 模板');
   const templateText = await lastDownloadText();
-  assert.equal(templateText, 'title,body,tags,usage,rating,note\n');
+  assert.equal(templateText, 'title,body,tags,usage,rating,note,organize,sourceNote\n');
   assert.equal(h.download()[h.download().length - 1].filename, 'prompt-library-template.csv');
   assert.equal(h.download().length, downloadsBefore + 3);
   h.dispose();
@@ -1256,5 +1299,336 @@ test('Escape closes a clean modal, and switching the locale re-renders the panel
   assert.equal(tr(h, 'full.sort.label'), 'Sort');
   h.setLanguage('zh');
   assert.match(h.text(), /提示库/);
+  h.dispose();
+});
+
+/* ------------------------------------------------------------------ */
+/* 29. Quick capture: inbox navigation, count and filtering            */
+/* ------------------------------------------------------------------ */
+
+test('inbox navigation shows the unorganized count, filters the list and keeps the badge', () => {
+  const h = seeded([
+    seedPrompt({
+      id: 'p-inbox',
+      title: '待整理提示',
+      organize: 'inbox',
+      capture: { kind: 'paste', at: 1700000000100 },
+    }),
+    seedPrompt({ id: 'p-organized', title: '已整理提示' }),
+  ]);
+  h.renderPage();
+  assert.deepEqual(listTitles(h).sort(), ['已整理提示', '待整理提示'].sort());
+  assert.match(h.text(), /收件箱（1）/);
+
+  const inboxNav = navItemByAria(h, tr(h, 'full.nav.inboxAria', { count: 1 }));
+  assert.ok(inboxNav, 'inbox nav item carries the count');
+  clickNode(h, inboxNav);
+  assert.deepEqual(listTitles(h), ['待整理提示'], 'inbox view only lists unorganized prompts');
+  assert.equal(navItemByAria(h, tr(h, 'full.nav.inboxAria', { count: 1 })).props['aria-pressed'], true);
+  const item = h
+    .all('button')
+    .find((node) => String(node.props.className || '').includes('pl-list-item'));
+  assert.ok(item, 'inbox item rendered');
+  assert.match(h.text(item), /待整理/, 'list item shows the to-organize badge');
+
+  // Other filters still combine with the inbox view.
+  h.clickButton(tr(h, 'full.nav.favorites'));
+  assert.equal(listTitles(h).length, 0);
+  assert.match(h.text(), /没有匹配的提示词/);
+  h.dispose();
+});
+
+test('an empty inbox shows its own empty copy and a zero count', () => {
+  const h = seeded([seedPrompt()]);
+  h.renderPage();
+  assert.match(h.text(), /收件箱（0）/);
+  const inboxNav = navItemByAria(h, tr(h, 'full.nav.inboxAria', { count: 0 }));
+  assert.ok(inboxNav, 'zero count is rendered');
+  clickNode(h, inboxNav);
+  assert.match(h.text(), /收件箱是空的/);
+  assert.match(h.text(), /快速收录的提示词会先进入收件箱/);
+  assert.equal(listTitles(h).length, 0);
+  h.dispose();
+});
+
+/* ------------------------------------------------------------------ */
+/* 30. Organization status: badge, toggle, persistence, failures      */
+/* ------------------------------------------------------------------ */
+
+test('detail shows the inbox badge and moves prompts between inbox and organized without touching updatedAt', () => {
+  const h = seeded([
+    seedPrompt({
+      id: 'p-inbox',
+      title: '待整理提示',
+      organize: 'inbox',
+      updatedAt: 1700000000000,
+      capture: { kind: 'paste', at: 1700000000100 },
+    }),
+  ]);
+  h.renderPage();
+  h.clickButton('待整理提示');
+  assert.match(h.text(), /整理状态/);
+  assert.match(h.text(), /当前状态：待整理/);
+  assert.match(h.text(), /待整理/);
+  assert.match(h.text(), /标记整理完成/);
+
+  h.clickButton('标记整理完成');
+  const organized = h.promptById('p-inbox');
+  assert.equal(organized.organize, 'organized');
+  assert.equal(organized.updatedAt, 1700000000000, 'organization change must not refresh updatedAt');
+  assert.equal(organized.bodyVersion, 1);
+  assert.match(h.text(), /已标记为整理完成/);
+  assert.match(h.text(), /当前状态：已整理/);
+  assert.match(h.text(), /重新移回收件箱/);
+  assert.match(h.text(), /收件箱（0）/);
+
+  h.clickButton('重新移回收件箱');
+  const back = h.promptById('p-inbox');
+  assert.equal(back.organize, 'inbox');
+  assert.equal(back.updatedAt, 1700000000000);
+  assert.match(h.text(), /已移回收件箱/);
+  assert.match(h.text(), /当前状态：待整理/);
+  assert.match(h.text(), /收件箱（1）/);
+  h.dispose();
+});
+
+test('a failed organization write keeps the stored status and surfaces the error', () => {
+  const h = seeded([
+    seedPrompt({ id: 'p-inbox', title: '待整理提示', organize: 'inbox' }),
+  ]);
+  h.renderPage();
+  h.clickButton('待整理提示');
+  h.setStorageFailure(true);
+  h.clickButton('标记整理完成');
+  assert.match(h.text(), /整理状态更新失败/);
+  assert.match(h.text(), /浏览器存储空间不足/);
+  assert.equal(h.promptById('p-inbox').organize, 'inbox', 'failed write leaves storage untouched');
+
+  h.setStorageFailure(false);
+  h.clickButton('标记整理完成');
+  assert.equal(h.promptById('p-inbox').organize, 'organized');
+  assert.match(h.text(), /已标记为整理完成/);
+  h.dispose();
+});
+
+/* ------------------------------------------------------------------ */
+/* 31. Capture source metadata and source-session jump                */
+/* ------------------------------------------------------------------ */
+
+test('detail shows capture source metadata and reports a failed source-session jump', () => {
+  const h = seeded([
+    seedPrompt({
+      id: 'p-captured',
+      title: '收录的提示词',
+      organize: 'inbox',
+      capture: {
+        kind: 'composer',
+        at: 1700000000100,
+        sessionId: 'session-9',
+        note: '来自输入框草稿',
+      },
+    }),
+  ]);
+  h.renderPage();
+  h.clickButton('收录的提示词');
+  const text = h.text();
+  assert.match(text, /来源信息/);
+  assert.match(text, /来源：输入框草稿/);
+  assert.match(text, /收录时间：/);
+  assert.match(text, /来源说明：来自输入框草稿/);
+  assert.match(text, /打开来源会话/);
+
+  // The real injected openSession throws when uiWorkspace is unavailable.
+  h.clickButton('打开来源会话');
+  assert.match(h.text(), /当前环境不支持打开来源会话/);
+  // The body and stored data are unaffected by the failed jump.
+  assert.match(h.text(), /请审查以下代码/);
+  assert.equal(h.promptById('p-captured').capture.sessionId, 'session-9');
+  h.dispose();
+});
+
+test('a throwing openSession shows a failure notice and leaves the prompt intact', () => {
+  const h = seeded([
+    seedPrompt({
+      id: 'p-captured',
+      title: '收录的提示词',
+      organize: 'inbox',
+      capture: { kind: 'paste', at: 1700000000100, sessionId: 'session-1' },
+    }),
+  ]);
+  h.renderPage({
+    openSession: () => {
+      throw new Error('boom-42');
+    },
+  });
+  h.clickButton('收录的提示词');
+  h.clickButton('打开来源会话');
+  assert.match(h.text(), /打开来源会话失败：boom-42/);
+  assert.match(h.text(), /请审查以下代码/, 'detail stays rendered');
+  h.dispose();
+});
+
+test('a chat-message capture explains that no exact message jump is offered', () => {
+  const h = seeded([
+    seedPrompt({
+      id: 'p-msg',
+      title: '对话收录',
+      organize: 'inbox',
+      capture: { kind: 'message', at: 1700000000100, messageId: 'msg-1' },
+    }),
+  ]);
+  h.renderPage();
+  h.clickButton('对话收录');
+  assert.match(h.text(), /来源：对话消息/);
+  assert.match(h.text(), /当前接口不支持定位到原消息/);
+  assert.equal(buttonByText(h, tr(h, 'full.capture.openSession')), undefined);
+  h.dispose();
+});
+
+/* ------------------------------------------------------------------ */
+/* 32. Header quick-capture entry                                     */
+/* ------------------------------------------------------------------ */
+
+test('the header quick-capture button opens the hub with an empty paste source', () => {
+  const calls = [];
+  const h = seeded([seedPrompt()]);
+  h.renderPage({
+    capture: {
+      open(payload) {
+        calls.push(payload);
+        return true;
+      },
+    },
+  });
+  const button = buttonByText(h, tr(h, 'full.capture.open'));
+  assert.ok(button, 'quick-capture button rendered');
+  assert.notEqual(button.props.disabled, true);
+  assert.equal(button.props.title, tr(h, 'full.capture.openHint'));
+  clickNode(h, button);
+  assert.deepEqual(calls, [{ text: '', source: { kind: 'paste' } }]);
+  h.dispose();
+});
+
+test('a capture hub failure is surfaced without touching the library', () => {
+  const h = seeded([seedPrompt()]);
+  h.renderPage({
+    capture: {
+      open() {
+        throw new Error('capture-broken');
+      },
+    },
+  });
+  h.clickButton(tr(h, 'full.capture.open'));
+  assert.match(h.text(), /快速收录打开失败：capture-broken/);
+  assert.deepEqual(h.prompts().map((prompt) => prompt.title), ['代码审查助手']);
+  h.dispose();
+});
+
+test('without a capture hub the quick-capture button is disabled and explains why', () => {
+  const h = seeded([seedPrompt()]);
+  h.renderPage({ capture: null });
+  const button = buttonByText(h, tr(h, 'full.capture.open'));
+  assert.ok(button, 'quick-capture button rendered');
+  assert.equal(button.props.disabled, true);
+  assert.equal(button.props['aria-disabled'], 'true');
+  assert.equal(button.props.title, tr(h, 'full.capture.unavailable'));
+  clickNode(h, button);
+  assert.equal(h.storage.map.size, 1, 'a disabled capture entry writes nothing');
+  h.dispose();
+});
+
+/* ------------------------------------------------------------------ */
+/* 33. Focus requests from the capture dialog                         */
+/* ------------------------------------------------------------------ */
+
+test('a focus request selects the prompt, returns to all prompts and clears every filter', () => {
+  const prompts = [
+    seedPrompt({ id: 'p-one', title: '第一条提示', tagIds: ['t1'] }),
+    seedPrompt({ id: 'p-two', title: '第二条提示' }),
+  ];
+  const tags = [{ id: 't1', name: '筛选标签', order: 0 }];
+  const focus = makeFocusStore();
+  const h = seeded(prompts, tags);
+  h.renderPage({ focus });
+  h.change(h.findInput('search'), '不存在的词');
+  h.clickButton(tr(h, 'full.nav.tagAria', { name: '筛选标签' }));
+  h.clickButton(tr(h, 'full.nav.rated4'));
+  assert.equal(h.findInput('search').props.value, '不存在的词');
+
+  focus.request('p-two');
+  h.render();
+  assert.equal(focus.current(), null, 'the focus request is consumed exactly once');
+  assert.equal(h.findInput('search').props.value, '', 'search is cleared');
+  const allNav = h.all('button').find(
+    (node) =>
+      String(node.props.className || '').includes('pl-nav-item') &&
+      h.text(node).trim() === tr(h, 'full.nav.all'),
+  );
+  assert.equal(allNav.props['aria-pressed'], true, 'view returns to all prompts');
+  assert.equal(
+    navItemByAria(h, tr(h, 'full.nav.tagAria', { name: '筛选标签' })).props['aria-pressed'],
+    false,
+    'tag filter is cleared',
+  );
+  const rated4 = buttonByText(h, tr(h, 'full.nav.rated4'));
+  assert.equal(rated4.props['aria-pressed'], false, 'quality filter is cleared');
+  assert.match(h.text(), /第二条提示/, 'requested prompt is selected');
+  assert.match(h.text(), /已使用 0 次/);
+  h.dispose();
+});
+
+test('a focus request for a missing prompt shows a notice instead of a broken detail', () => {
+  const focus = makeFocusStore();
+  const h = seeded([seedPrompt()]);
+  h.renderPage({ focus });
+  focus.request('deleted-id');
+  h.render();
+  assert.match(h.text(), /要查看的提示词不存在或已被删除/);
+  assert.equal(focus.current(), null);
+  assert.match(h.text(), /从列表中选择提示词查看详情/, 'no broken detail is rendered');
+  h.dispose();
+});
+
+/* ------------------------------------------------------------------ */
+/* 34. Import field guide covers the new capture columns              */
+/* ------------------------------------------------------------------ */
+
+test('the import field guide documents the organize and sourceNote columns', () => {
+  const h = seeded([seedPrompt()]);
+  h.renderPage();
+  h.clickButton('导入');
+  const text = h.text();
+  assert.match(text, /organize/);
+  assert.match(text, /sourceNote/);
+  assert.match(text, /CSV 列：title、body、tags、usage、rating、note、organize、sourceNote/);
+  assert.match(text, /整理状态/);
+  assert.match(text, /来源说明/);
+  h.dispose();
+});
+
+/* ------------------------------------------------------------------ */
+/* 35. Capture dictionary parity                                       */
+/* ------------------------------------------------------------------ */
+
+test('capture, inbox and organization dictionary entries keep zh/en parity', () => {
+  const h = harness();
+  h.renderPage();
+  const prefixes = ['full.inbox.', 'full.organize.', 'full.capture.'];
+  const pick = (lang) =>
+    Object.keys(h.dictionaries[lang])
+      .filter((key) => prefixes.some((prefix) => key.startsWith(prefix)))
+      .sort();
+  const zh = pick('zh');
+  const en = pick('en');
+  assert.deepEqual(zh, en, 'capture-related zh/en key sets must be identical');
+  assert.ok(zh.length >= 20, 'capture feature has a meaningful dictionary surface');
+  for (const key of zh) {
+    assert.ok(h.dictionaries.zh[key].length > 0, key + ' has zh text');
+    assert.ok(h.dictionaries.en[key].length > 0, key + ' has en text');
+  }
+  assert.notEqual(
+    h.dictionaries.zh['full.organize.markDone'],
+    h.dictionaries.en['full.organize.markDone'],
+  );
   h.dispose();
 });

@@ -12,7 +12,7 @@
 | [人生九宫格](life-grid/) | 年度九宫格规划面板（方法参考《只管去做》第二章）：八个生活领域围绕年度主题，逐领域写目标、星标重点领域、记录五年愿景，按年度保存，支持 JSON 导出 / 导入与 Markdown 复制 | `sidebar.panellist` 侧栏图标 + 整页面板 |
 | [待办清单](todo-list/) | 待办任务管理（内部分组 / 条目切换分组 / 截止日期 / 优先级 / 今天与过期筛选 / 拖拽排序 / 行内删除确认）：输入框旁快速记一条，侧栏整页安排；点任务的分组徽标或拖到侧栏分组即可换组；支持 JSON 导出 / 导入与 Markdown 复制 | `conversation.composer.dock` 快速添加 + `sidebar.panellist` 侧栏图标 + 整页面板 |
 | [知识树](knowledge-tree/) | 知识梳理工作台，严格按「先列举 → 再归类 → 后成树」三阶段推进：卡片分标题、内容与可选配图（粘贴/拖入，自动压缩）、默认收起点击展开；归类是自动布局的白板，可新建上位主题、把卡片拖到目标卡片上建立归属（拖到专门区域设为顶层，Shift 拖放加关联，不复制卡片），状态分待整理 / 顶层主题 / 已归入上级；成树后做结构检查（环、关联、过宽），树名与保存状态明确，支持 Markdown / Mermaid / JSON / 纯文本导出 | `sidebar.panellist` 侧栏图标 + 整页面板 |
-| [提示库](prompt-library/) | 提示词管理：集中保存、标签分类、收藏 / 置顶 / 最近使用、搜索与组合筛选、1～5 星半星个人评分（评分关联正文版本，改正文后标记「待复评」）、评价备注、可选的 AI 辅助评价（仅用户主动触发、≤200 字、仅供参考）、CSV 交换与 JSON 完整备份；复制或安全插入当前草稿 | `sidebar.panellist` 侧栏图标 + 整页面板；`conversation.input.right` 输入框旁快捷选择面板 |
+| [提示库](prompt-library/) | 提示词管理：集中保存、标签分类、收藏 / 置顶 / 最近使用、搜索与组合筛选、1～5 星半星个人评分（评分关联正文版本，改正文后标记「待复评」）、评价备注、可选的 AI 辅助评价（仅用户主动触发、≤200 字、仅供参考）、CSV 交换与 JSON 完整备份；复制或安全插入当前草稿；快速收录（粘贴 / 整份草稿 / 对话选中文本，收件箱整理状态、自动标题、重复提醒、来源元数据） | `sidebar.panellist` 侧栏图标 + 整页面板；`conversation.input.right` 输入框旁快捷选择面板与「存草稿」入口；对话选中文本浮层 |
 
 ## 安装
 
@@ -50,7 +50,7 @@ git clone git@github.com:wngzwng/dsh-plugins.git
 | 人生九宫格 | `dsh-life-grid/v1` | 按年度保存的九宫格内容（目标、重点领域、年度主题、五年愿景） |
 | 待办清单 | `dsh-todo-list/v1`、`dsh-todo-list:ui/v1` | 任务与自建分组，上次选中的分组与筛选 |
 | 知识树 | IndexedDB `dsh-knowledge-tree-library`；引导语 localStorage `dsh-knowledge-tree:prompts/v1` | 多棵本地树、配图、同步基线、远端只读缓存与恢复快照；保留旧 localStorage 迁移源 |
-| 提示库 | `dsh-prompt-library/v1`、`dsh-prompt-library:ui/v1` | 提示词、标签及排序、收藏 / 置顶 / 使用记录、个人评分与备注（含正文版本关联）、AI 评价（含模型、时间与输入快照），以及视图 / 筛选偏好 |
+| 提示库 | `dsh-prompt-library/v1`、`dsh-prompt-library:ui/v1` | 提示词、标签及排序、收藏 / 置顶 / 使用记录、个人评分与备注（含正文版本关联）、AI 评价（含模型、时间与输入快照）、整理状态与收录来源元数据（来源类型 / 收录时间 / 可选来源会话 / 来源说明），以及视图 / 筛选 / 正文显示偏好 |
 
 换浏览器、清缓存或换设备前，建议用各插件右上角的「导出 JSON」留一份备份。
 
@@ -107,6 +107,7 @@ prompt-library/
 ├── index.js            # Host 半：AI 评价 status/review 路由（可选 webServer / llm）
 ├── core.js             # 纯数据逻辑（评分版本、排序、搜索、CSV / JSON、200 字校验），Host 与 Client 共享
 ├── client.js           # 浏览器半骨架：i18n、store、共享组件、槽位注册；含生成块
+├── src/capture.js      # 共享快速收录弹层与捕获请求 hub（被 build 嵌入 client.js）
 ├── src/full-panel.js   # UI 源片段：整页管理面板（被 build 嵌入 client.js）
 ├── src/quick-picker.js # UI 源片段：输入框快捷入口与快捷选择面板
 ├── build-client.mjs    # 构建：把 core.js 与 src/*.js 嵌入 client.js
@@ -137,6 +138,8 @@ timer and a quick to-do capture docked under the composer, plus an annual nine-g
 planner, a full to-do page, a three-stage knowledge tree and a prompt library in the
 sidebar. Each plugin is an installable DSH bundle; data stays in the browser
 `localStorage`. The prompt library adds a quick picker beside the composer for copying or
-safely inserting a prompt into the current draft, local half-star personal ratings with
-body-version awareness, CSV exchange / JSON backup, and an optional user-triggered AI review
-that runs on the Host through the configured DSH model service.
+safely inserting a prompt into the current draft, quick capture (pasted text, the whole
+composer draft, or selected chat text) into an Inbox with auto titles, duplicate warnings and
+optional source metadata, local half-star personal ratings with body-version awareness, CSV
+exchange / JSON backup, and an optional user-triggered AI review that runs on the Host through
+the configured DSH model service.
