@@ -1,0 +1,6 @@
+# Prompt Library bundle patch: one Host row (AI review route + model status).
+# The whole prompt library is the Client half; the Host half only exposes the
+# optional AI-review bridge that reuses the configured DSH model service.
+- insert:
+    - id: prompt-library
+      name: '@local/prompt-library'

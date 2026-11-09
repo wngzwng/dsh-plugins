@@ -1,0 +1,211 @@
+# 提示库（Prompt Library）
+
+> 好提示词，不应该只用一次。
+
+DSH Web UI 插件：把散落在聊天、备忘录、网页和文档里的提示词集中保存，用标签、收藏、置顶、
+最近使用、评分和搜索快速找到，并复制或**安全插入当前会话草稿**。数据默认只保存在本机浏览器；
+AI 辅助评价由用户主动触发，复用 DSH 已配置的模型服务，仅作为第二视角参考。
+
+- 产品定位与验收：见需求书；实现契约与决策记录：见同级 [`DESIGN.md`](DESIGN.md)
+- 依赖：DeepSeek Harness **0.2.2-rc.1**（客户端插件机制、`sidebar.panellist` / `main` /
+  `conversation.input.right` 槽位、`inputActions.captureInsertion()/insertText()`、
+  `ctx.locale`、`ctx.llm`、`ctx.agentDefaultModel`、`ctx.webServer`）
+
+## 功能
+
+### 侧栏整页管理面板
+
+左侧栏「提示库」图标打开整页管理：
+
+- **导航**：全部提示词、收藏、最近使用、未评分、待复评；质量筛选 4 星及以上 / 3 星及以上；
+  标签列表（含计数）与标签管理（新建、重命名、上移/下移排序、删除；删除只移除分类关系，
+  不会删除提示词）。
+- **列表**：搜索（标题、正文、标签；忽略英文大小写，可与视图/标签/评分筛选组合）、
+  排序（默认 / 最近更新 / 最近使用 / 评分从高到低 / 评分从低到高，下方注明规则）、
+  标题、摘要、标签、评分、收藏/置顶标识；空态、首用欢迎、无结果一键清除筛选。
+- **详情**：完整正文（保留换行、可滚动）、使用场景、标签、个人评分与评价备注、AI 辅助评价、
+  编辑/复制正文/收藏/置顶/删除/分享按钮。
+- **新建 / 编辑**：标题和正文必填（纯空白拒绝）；正文多行原样保留；多标签；关闭有未保存
+  修改的编辑弹层会先确认；保存失败保留草稿并说明原因，不出现虚假成功。
+- **删除**：二次确认。
+- **窄窗口**：列表与详情分步展示；弹层、按钮、焦点和键盘操作适配触控与桌面。
+
+### 输入框快捷入口
+
+会话输入框工具栏新增「提示库」按钮，点击打开轻量选择面板（不离开当前会话）：
+
+- 快速访问置顶、收藏、最近使用；搜索标题/正文/标签；展示标题、标签和个人评分。
+- 预览完整正文后，可「复制正文」或「插入输入框」（在光标/选区处插入，可撤销，不自动发送，
+  不覆盖整份草稿）。
+- 复制/插入成功后显示不打断操作的「用后评分」入口。
+- 当前 DSH 无安全插入接口时明确降级为复制（不通过 DOM 模拟输入）。
+
+### 提示词与评分
+
+- 收藏与置顶互相独立；默认排序置顶优先、同组按更新时间倒序；显式排序不被置顶插队。
+- 「最近使用」严格按最后使用时间倒序，置顶不改变顺序；只有复制或插入**成功**才记录使用，
+  查看/编辑/评分/AI 评价都不计为使用。
+- 1～5 星个人评分、允许半星、可修改/清除；支持键盘操作与明确的无障碍标签；
+  未评分与低分严格区分。
+- 评价备注单独保存；复制/插入只复制正文。
+- **正文版本关联**：正文变化后保留旧评分与备注，标记为「待复评」；旧评分可查看但不参与当前
+  版本的评分排序与 4 星+/3 星+ 筛选；重新评分或点「沿用原评分」后解除。
+  标题、使用场景、标签、收藏、置顶变化不使评分失效。
+- 个人评分说明：反映你自己的实际使用体验，不代表提示词在所有模型和任务中都有效。
+
+### AI 辅助评价（可选，需 Host 半可用）
+
+- 仅由用户在详情页/编辑页主动点击触发；不自动、不批量；评价语言跟随界面语言（中文界面使用需求书给定的中文评审指令，英文界面使用等价英文指令）。
+- 调用前显示所用**模型/provider**，说明将发送**标题、正文、使用场景**（不含个人评价备注、
+  其他提示词、会话历史），并提示可能产生模型费用。
+- 评价调用会为该短评审任务自动选择模型可用的**最低 reasoning effort**（如 `off`/`low`）并保留
+  独立输出预算，避免思考 token 占满 `max_tokens` 导致「模型输出被截断」；不支持 reasoning
+  元数据的适配器会省略该字段，按服务默认执行。
+- 评价正文最多 **200 个可见字符**（按 Unicode 码点，标点计入，空白不计），超限时最多自动
+  压缩一次并再次校验；仍超限则报错，不展示超长正文。
+- 依据目标清晰度、上下文充分性、约束合理性、输出要求和可复用性，给出优点、潜在问题和一条
+  优先改进建议；不给 AI 星级，不声称已验证效果，不执行提示词数据中的指令。
+- 固定提示：**「AI 评价仅供参考，实际效果请以你的使用体验为准。」**
+- 评价展示生成时间与模型；支持重新生成/删除；重新生成成功才替换旧结果，失败保留旧结果；
+  不改变个人评分、收藏、置顶或排序。
+- 评价与提交时的标题/正文/场景快照绑定；这些输入变化后显示「内容已修改，建议重新评价」；
+  标签/收藏/置顶/个人评分变化不影响。编辑页对未保存草稿的评价不会覆盖已保存版本的评价，
+  只有保存内容与评价输入一致时才关联。
+
+### 导入 / 导出
+
+- **CSV**（用于交换）：列 `title,body,tags,usage,rating,note`（也接受中文表头别名）。
+  多标签编码为 **JSON 数组字符串**（如 `["写作","代码"]`），因此标签名内的逗号、引号不会
+  被错误拆分；按 RFC 4180 处理中文、引号、逗号和跨行正文；评分限定 0.5 步进的 1～5 星。
+  导出时对 `= + - @` 等公式前导字符加 `'` 防护，导入时对称还原（见下文限制）。
+  提供字段说明与可下载模板；导入前预览新增/重复/无效数量及原因，确认后才写入；
+  重复项按「标题+正文完全相同」识别并跳过，不静默覆盖；CSV 无法保留正文版本关联，
+  导入的评分一律按「待复评」保守处理。
+- **JSON**（用于完整备份/迁移）：保留提示词、标签及排序、收藏、置顶、使用时间与次数、
+  个人评分/备注及评分版本关联、AI 评价（正文、模型、生成时间、输入快照）和数据版本号。
+  恢复前校验格式与版本，可选择**合并**（跳过同 id 重复，不覆盖已有）或**替换**；
+  替换需二次确认，且写入失败不会破坏现有数据。
+- 兼容旧数据：缺少评分按未评分、缺少 AI 评价显示尚未评价、缺少版本关联不伪造有效性；
+  不会自动调用 AI 补齐历史评价。
+
+## 数据保存位置与隐私
+
+- 数据保存在**当前浏览器当前访问地址的 `localStorage`**：
+  - 提示词/标签/评分/AI 评价：键 `dsh-prompt-library/v1`
+  - 界面偏好（视图/筛选/排序）：键 `dsh-prompt-library:ui/v1`
+  - 清理站点数据、更换浏览器、更换访问地址（如端口变化）、更换设备或使用隐私模式，
+    都可能导致数据不可见或丢失；请用 JSON 完整备份迁移。
+- 不默认上传、不自动启用第三方同步；首版不含 iCloud 或其他云同步。
+- 存储失败、容量不足、数据损坏均有明确提示，不静默重置或覆盖原始数据：数据损坏时暂停写入，
+  提供原始数据下载，只有用户明确确认后才重置。
+- AI 评价只在用户主动点击时执行：仅发送**标题、正文、使用场景**；不发送个人评价备注、其他
+  提示词或会话历史；不创建/发送/污染会话消息；评价任务不启用工具调用。模型调用在 Host 侧经
+  `ctx.llm` 完成，前端不接触密钥。
+- 提示词正文是用户数据，不自动执行，不注入系统提示词，不注入所有会话。
+
+## AI 评价的模型接入与配置
+
+- Host 半挂载时通过 `ctx.inject(['llm'])` 使用当前 DSH 已配置的模型服务，不额外保存密钥。
+- 模型选择顺序：
+  1. 插件行配置 `provider` + `model`（可选，见下）；
+  2. 当前 DSH 的默认模型（`ctx.agentDefaultModel.currentSelection()`，即设置里的默认模型）；
+  3. 已注册 provider 的第一个可用模型。
+  都不可用（未配置任何模型/模型服务缺失/旧版本 DSH 无相关接口）时，界面明确提示
+  「AI 评价不可用」，管理、评分、复制、导入导出等功能不受影响。
+- 可选固定模型（编辑 `~/.dsh/profiles/<profile>/cordis.patch.yml` 中本插件行）：
+  ```yaml
+  - id: prompt-library
+    name: '@local/prompt-library'
+    config:
+      provider: deepseek-account
+      model: deepseek-flash
+  ```
+- 费用：AI 评价使用你的模型账号发起一次（超长时最多两次）普通模型调用，可能产生模型费用；
+  调用前界面会写明所用模型。评价任务不传 tools、不传 sessionId，不会在会话里产生消息。
+
+## 安装
+
+前置：已安装 DSH，`plugin_manager` 可用。本仓库每个插件目录都是独立 bundle。
+
+```bash
+# 在仓库根目录
+# 1) 构建浏览器半（把 core.js 与 src/*.js 嵌入 client.js）
+node prompt-library/build-client.mjs
+# 2) 在 DSH 中安装本目录（会话里让 Agent 执行，或 Plugin Manager 选择目录）
+#    plugin_manager install_bundle target: <仓库绝对路径>/prompt-library
+```
+
+安装后如界面没有立即变化，重启 DSH 或刷新页面。左侧栏出现「提示库」图标；会话输入框工具区
+出现「提示库」快捷入口。卸载插件不会删除浏览器里的数据（重新安装可见）。
+
+## 开发与测试
+
+目录结构见 `DESIGN.md` §1。构建与测试（无 npm 依赖）：
+
+```bash
+cd prompt-library && node build-client.mjs && cd ..
+node --check prompt-library/client.js
+node --check prompt-library/index.js
+node --check prompt-library/core.js
+node --test tests/prompt-library-*.test.js   # core / host / panel / quick
+node --test tests/*.test.js                  # 全仓库回归（不破坏既有插件）
+```
+
+- `core.js`：纯数据逻辑（评分有效性、排序、搜索、CSV/JSON、AI 字数校验），可独立测试。
+- `index.js`：Host 半，注册 `GET /dsh-prompt-library/ai/status` 与
+  `POST /dsh-prompt-library/ai/review`；校验 Origin/Host、限制并发与超时、校验字数。
+- `client.js`：浏览器半骨架 + 共享 store/组件；`src/full-panel.js`、`src/quick-picker.js`
+  为可编辑 UI 片段，由 `build-client.mjs` 嵌入。
+
+## 验证结果（自动化测试）
+
+仓库内无 npm 依赖的测试（`node:test` + 假 window/document/locale/fetch 与递归 React 渲染器，
+直接加载构建后的 `client.js` 渲染真实组件树）：
+
+| 文件 | 覆盖 | 结果 |
+| --- | --- | --- |
+| `tests/prompt-library-core.test.js` | 评分合法性/有效/待复评、正文版本、默认/显式/评分排序、recent 严格排序、搜索与组合筛选、标签 trim/重名/排序、CSV 往返与公式防护、CSV 导入预览、JSON 备份校验/合并/替换、200 可见字符校验 | 47/47 |
+| `tests/prompt-library-host.test.js` | 假 ctx 的两条路由：模型解析、请求只含 title/body/usage、无 tools/session、最低 reasoning effort 选择与缓存、超 200 压缩一次、空/错误/截断/超长/超时/并发上限/Origin 403、日志与响应不泄漏正文/密钥 | 28/28 |
+| `tests/prompt-library-panel.test.js` | 整页面板：首用/空态、新建必填、编辑未保存确认、删除与标签删除二次确认、标签管理、收藏/置顶、排序与筛选、半星评分/备注/待复评/沿用、AI 状态/成功/失败/过期/草稿关联、复制与用后评分、CSV/JSON 导入预览与替换确认、导出/分享、corrupt/storage-error、窄窗口、i18n 与无障碍 | 28/28 |
+| `tests/prompt-library-quick.test.js` | 快捷入口：分区与搜索、复制/插入成功与失败、无插入接口降级、用后评分、键盘、Esc、会话切换安全、空态/无结果、i18n | 20/20 |
+| `tests/prompt-library-integration.test.js` | 三个槽位注册、中英字典 parity、样式注入与卸载清理、corrupt/新版本/不可用存储不被覆盖、跨标签页刷新、layout 打开整页、下载内容、备注自动保存 | 16/16 |
+
+全量回归：`node prompt-library/build-client.mjs && node --test tests/*.test.js`
+→ **210/210 通过**（含既有番茄时钟 / 九宫格 / 待办清单 / 知识树测试，未破坏）。
+另有 `node --check` 覆盖 `client.js`、`core.js`、`index.js`、两个 UI 片段。
+
+**已验证**：上述自动化行为（含 localStorage 持久化、复制/插入 API 调用与拒绝路径、评分版本、
+CSV/JSON 往返、AI Host 请求与错误路径、字典/主题 token/卸载清理）。
+另外在真实 DSH 0.2.2-rc.1（本机安装后）实测：`GET .../ai/status` 返回默认模型
+`deepseek-account / deepseek-flash`；`POST .../ai/review` 成功返回 96 个可见字符的评审（1.3s），
+空标题 400、跨站 Origin 403；修复「思考 token 占满预算导致 TRUNCATED」后回归通过。
+**未验证（环境限制，未安装插件/未改 DSH profile）**：真实 DSH GUI 中的最终视觉效果与真实
+`inputActions`/模型调用；测试用同签名假实现覆盖，接口以 DSH 0.2.2-rc.1 公开文档与已安装插件
+（dsh-prompt-optimizer 的 `webServer.register` + `ctx.llm.stream`）为准。
+
+## 已知限制与兼容性
+
+- 只支持 DSH 0.2.2-rc.1 的公开扩展接口；更老版本若缺少 `conversation.input.right`、
+  `captureInsertion/insertText`、`ctx.llm` 或 `ctx.webServer`，快捷入口/AI 评价会明确降级
+  （插入不可用→复制；AI 不可用→提示），管理功能不受影响。
+- **插入仅从输入框旁快捷面板发起**：整页面板不在 composer 作用域，拿不到 `inputActions`，
+  因此详情页提供「复制正文」；请从输入框快捷面板执行“插入输入框”。
+- 数据仅在当前浏览器当前 origin；**不跨设备同步**。多标签页同时编辑时以最后一次成功写入为准
+  （`storage` 事件会刷新其他标签页的显示，但不做冲突合并）。
+- CSV 公式注入防护：导出时对以 `= + - @ \t \r` 开头的字段加前导 `'`，导入时仅当 `'` 后紧跟
+  这些字符才去掉一个 `'`。因此“原文本身以 `'=` 等开头”的字段往返会少一个 `'`；其余文本
+  （含中文、多行、引号、逗号）往返不变。需要严格无损迁移时请用 JSON。
+- CSV 不包含 AI 评价和正文版本号；导入评分按「待复评」处理（不会误认为当前版本有效评分）。
+- AI 评价不保证模型响应质量；仅在配置了可用模型时可用，且每次调用都可能计费；Host 路由为本机
+  HTTP exact 路由（与其它本地插件同一模式），带 Origin/Host 校验，不向浏览器返回密钥。
+- 整页面板使用宿主 `main` 槽位高度（`height:100%`）；若某个自定义组合没有给主面板高度，
+  三栏可能显示为塌陷，常规 DSH Web/桌面组合不受影响。
+
+## English summary
+
+Prompt Library for the DeepSeek Harness Web UI: a sidebar page to save/tag/favorite/pin/rate and
+search prompts (with half-star personal ratings and version-aware "needs re-rating" state), plus a
+quick picker beside the composer to copy or safely insert a prompt into the current draft. Data is
+stored in this browser's `localStorage`; CSV export/import is for exchange and JSON for full backups.
+An optional, user-triggered AI review uses the DSH model service on the Host half only (no keys in the
+browser) and is shown as a clearly-labelled reference, never as a personal rating.

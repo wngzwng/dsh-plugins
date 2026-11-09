@@ -1,0 +1,50 @@
+{
+  "name": "@local/prompt-library",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Prompt Library for the DeepSeek Harness Web UI: save, tag, rate, search and reuse prompts from a sidebar page and a quick picker beside the composer. Local browser storage, CSV / JSON backup, optional host-side AI review with an explicit model notice.",
+  "type": "module",
+  "scripts": {
+    "build": "node build-client.mjs",
+    "test": "node build-client.mjs && node --test ../tests/prompt-library*.test.js"
+  },
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./core": "./core.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "core.js",
+    "client.js",
+    "build-client.mjs",
+    "src/full-panel.js",
+    "src/quick-picker.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-sidebar",
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ]
+    },
+    "manifestVersion": 1
+  },
+  "engines": {
+    "node": ">=22.19.0",
+    "dsh": "0.2.2-rc.1"
+  }
+}
