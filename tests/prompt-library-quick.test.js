@@ -798,6 +798,92 @@ test('closing the panel does not re-open the entry hover tooltip', () => {
   h.dispose();
 });
 
+test('save-draft tooltip stays hidden while the capture dialog is open and right after closing it', () => {
+  const h = makeHarness();
+  const hub = captureHub(h);
+  renderSaveDraft(h, { sessionId: 'session-tip', input: { draft: '带内容的草稿' } });
+
+  // Normal hover still explains the action.
+  const before = hoverTipAt(h, 0);
+  assert.equal(before.text, '把输入框中的整份草稿收录为提示词');
+  leaveTip(h, before.wrapper);
+
+  h.clickButton('保存为提示词');
+  const opened = hub.getSnapshot().request;
+  assert.ok(opened, 'click opens the capture dialog');
+
+  // While the dialog is open, focus/hover cannot re-open the tooltip.
+  let wrapper = hoverTipWrappers(h)[0];
+  wrapper.props.onFocus({ type: 'focus' });
+  wrapper.props.onMouseEnter({ type: 'mouseenter' });
+  h.render();
+  assert.equal(h.all('div').some((node) => node.props && node.props.role === 'tooltip'), false);
+
+  // Closing the dialog restores focus to this button; the tooltip must not pop
+  // up again (the previous bug).
+  hub.close();
+  h.render();
+  wrapper = hoverTipWrappers(h)[0];
+  wrapper.props.onFocus({ type: 'focus' });
+  wrapper.props.onMouseEnter({ type: 'mouseenter' });
+  h.render();
+  assert.equal(
+    h.all('div').some((node) => node.props && node.props.role === 'tooltip'),
+    false,
+    'tooltip stays hidden right after closing the capture dialog',
+  );
+  h.dispose();
+});
+
+test('save-draft entry subscribes to useInput so a filled draft is never treated as empty', () => {
+  const h = makeHarness();
+  const hub = captureHub(h);
+  renderSaveDraft(h, {
+    sessionId: 'session-live',
+    /* The slot snapshot is stale/empty; the hook carries the live draft. */
+    input: { draft: '' },
+    useInput: () => ({ draft: '实时草稿内容' }),
+  });
+
+  const button = h.buttonByLabel('保存为提示词');
+  assert.equal(button.props.disabled, false, 'live draft makes the button usable');
+  const hovered = hoverTipAt(h, 0);
+  assert.equal(hovered.text, '把输入框中的整份草稿收录为提示词');
+  leaveTip(h, hovered.wrapper);
+
+  h.clickButton('保存为提示词');
+  const request = hub.getSnapshot().request;
+  assert.ok(request);
+  assert.equal(request.text, '实时草稿内容', 'click snapshots the live draft');
+  assert.equal(request.source.kind, 'composer');
+  assert.equal(request.source.sessionId, 'session-live');
+  hub.close();
+  h.dispose();
+});
+
+test('the quick panel draft-capture button also follows the live input hook', () => {
+  const h = makeHarness({
+    slotProps: {
+      sessionId: 'session-panel',
+      input: { draft: '' },
+      useInput: () => ({ draft: '面板实时草稿' }),
+    },
+  });
+  const hub = captureHub(h);
+  h.renderQuick();
+  openPanel(h);
+
+  const button = h.buttonByLabel('保存草稿为提示词');
+  assert.equal(button.props.disabled, false);
+  h.clickButton('保存草稿为提示词');
+  const request = hub.getSnapshot().request;
+  assert.ok(request);
+  assert.equal(request.text, '面板实时草稿');
+  assert.equal(request.source.sessionId, 'session-panel');
+  hub.close();
+  h.dispose();
+});
+
 test('save-draft entry: button a11y + whole-draft snapshot and no composer mutation', () => {
   const h = makeHarness();
   const hub = captureHub(h);

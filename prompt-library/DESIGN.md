@@ -546,7 +546,7 @@ function createStore({ storage, uuid, now })
 10. **样式与测试**：UI 片段各自持有 `FULL_PANEL_CSS`/`QUICK_PICKER_CSS`，骨架注入一个
    `data-dsh-plugin="prompt-library"` 的 `<style>` 并随卸载移除；测试用
    `tests/helpers/prompt-library-harness.js` 的假 React/portal/document/locale/fetch 渲染真实
-   组件树。当前测试：提示库 215 项（core 47、host 28、capture-core 30、panel 42、quick 33、integration 35）；整仓库回归会受工作区中 knowledge-tree 在建改动影响，提示库套件独立全绿。
+   组件树。当前测试：提示库 218 项（core 47、host 28、capture-core 30、panel 42、quick 36、integration 35）；整仓库回归会受工作区中 knowledge-tree 在建改动影响，提示库套件独立全绿。
 
 ## 9. 快速收录（quick capture）实现契约 v1（2026-11 增补）
 
@@ -692,3 +692,8 @@ AI 辅助整理/改写（可选增强，不在首版）；来源消息精确跳�
 「全部 / 置顶 / 收藏 / 最近使用」，默认「全部」，各页签带数量；搜索时页签让位给匹配结果；
 空分类显示「这个分类还没有提示词」与「查看全部」；页签为 ARIA tablist，支持 ←/→/Home/End 键盘切换。
 关闭面板后 600ms 内抑制入口 tooltip，避免焦点恢复（Modal 关闭时把焦点还给按钮）导致介绍又弹出来。
+「存草稿」入口同时订阅 capture hub：收录弹层打开期间及关闭后的 600ms 内抑制入口 tooltip，
+并在渲染阶段识别 open→closed 转换（Modal 关闭会在同一 commit 内恢复焦点，等 effect 会先闪一下）。
+「存草稿」入口与快捷面板草稿按钮必须通过 slot props 的 `useInput` 订阅草稿（selector 传递完整快照），
+不能只读 `input` 快照：composer 不会因每次击键重新渲染该 slot 条目，否则会出现「输入框有内容
+但按钮仍判断为空 / tooltip 显示空草稿」的过期状态。

@@ -475,6 +475,9 @@ function QPPreview(props) {
 /** Inbox/tray icon used by the capture entries; color comes from currentColor. */
 let QP_TIP_SEQUENCE = 0;
 
+const QP_NOOP_SUBSCRIBE = () => () => {};
+const QP_EMPTY_CAPTURE_SNAPSHOT = Object.freeze({ seq: 0, request: null });
+
 /**
  * Immediate hover/focus description. Native `title` tooltips wait about a
  * second before showing, which felt slow in the composer toolbar; this renders
@@ -489,6 +492,9 @@ function QPHoverTip(props) {
   const idRef = React.useRef(null);
   const suppressRef = React.useRef(false);
   suppressRef.current = props.suppress === true;
+  React.useEffect(() => {
+    if (props.suppress === true) setOpen(false);
+  }, [props.suppress]);
   if (idRef.current === null) {
     QP_TIP_SEQUENCE += 1;
     idRef.current = 'plq-tip-' + String(QP_TIP_SEQUENCE);
@@ -616,7 +622,55 @@ function PromptLibrarySaveDraftEntry(props) {
   const t = useT(source.locale);
   const capture = source.capture || null;
   const captureReady = Boolean(capture && typeof capture.open === 'function');
-  const draft = slotProps.input && typeof slotProps.input.draft === 'string' ? slotProps.input.draft : '';
+  /* Subscribe to the capture hub so the entry tooltip can be suppressed while
+   * its dialog is open and just after it closes: Modal restores focus to this
+   * button, which would otherwise immediately re-open the hover description. */
+  const captureStore =
+    capture && typeof capture.subscribe === 'function' && typeof capture.getSnapshot === 'function'
+      ? capture
+      : null;
+  const captureSnapshot = React.useSyncExternalStore(
+    captureStore ? captureStore.subscribe : QP_NOOP_SUBSCRIBE,
+    captureStore ? captureStore.getSnapshot : () => QP_EMPTY_CAPTURE_SNAPSHOT,
+  );
+  const captureOpen = Boolean(captureSnapshot && captureSnapshot.request);
+  const [tipSuppressed, setTipSuppressed] = React.useState(false);
+  const tipTimerRef = React.useRef(null);
+  const captureWasOpenRef = React.useRef(false);
+  /* Compute the open->closed transition during render: closing the dialog
+   * restores focus in the same commit, so waiting for an effect would let the
+   * tooltip flash open first. */
+  const captureJustClosed = captureWasOpenRef.current && !captureOpen;
+  if (captureOpen) captureWasOpenRef.current = true;
+  else if (captureJustClosed) captureWasOpenRef.current = false;
+  React.useEffect(() => {
+    if (!captureJustClosed) return;
+    setTipSuppressed(true);
+    if (tipTimerRef.current) clearTimeout(tipTimerRef.current);
+    tipTimerRef.current = setTimeout(() => {
+      tipTimerRef.current = null;
+      setTipSuppressed(false);
+    }, 600);
+    if (tipTimerRef.current && typeof tipTimerRef.current.unref === 'function') tipTimerRef.current.unref();
+  }, [captureJustClosed]);
+  React.useEffect(
+    () => () => {
+      if (tipTimerRef.current) clearTimeout(tipTimerRef.current);
+    },
+    [],
+  );
+  /* The slot passes a snapshot plus the `useInput` hook. Reading props.input
+   * alone goes stale: the composer slot does not re-render this entry on every
+   * keystroke, so the button used to think an already-filled draft was empty.
+   * Subscribe through the standard hook when the host provides it. */
+  const useInput = typeof slotProps.useInput === 'function' ? slotProps.useInput : null;
+  const liveInput = useInput ? useInput((state) => state) : slotProps.input;
+  const draft =
+    liveInput && typeof liveInput.draft === 'string'
+      ? liveInput.draft
+      : slotProps.input && typeof slotProps.input.draft === 'string'
+        ? slotProps.input.draft
+        : '';
   const hasDraft = draft.trim() !== '';
   const disabled = !captureReady || !hasDraft;
   const title = !captureReady
@@ -627,17 +681,16 @@ function PromptLibrarySaveDraftEntry(props) {
 
   function onClick() {
     if (!captureReady) return;
-    /* Snapshot the whole draft and the session id at click time; never mutate. */
-    const live = source.slotProps && source.slotProps.input ? source.slotProps.input : {};
-    const text = typeof live.draft === 'string' ? live.draft : '';
-    if (text.trim() === '') return;
-    const sessionId = source.slotProps ? source.slotProps.sessionId : undefined;
-    capture.open({ text, source: { kind: 'composer', sessionId } });
+    /* Snapshot the whole draft and the session id at click time; never mutate.
+     * `draft` comes from the subscribed input snapshot above. */
+    if (draft.trim() === '') return;
+    const sessionId = slotProps.sessionId;
+    capture.open({ text: draft, source: { kind: 'composer', sessionId } });
   }
 
   return h(
     QPHoverTip,
-    { label: title },
+    { label: title, suppress: captureOpen || captureJustClosed || tipSuppressed },
     h(
       'button',
       {
@@ -755,8 +808,14 @@ function PromptLibraryQuickEntry(props) {
   /* Optional Lead-injected capture hub; every entry degrades safely without it. */
   const capture = (props && props.capture) || null;
   const captureReady = Boolean(capture && typeof capture.open === 'function');
+  const useInputHook = typeof slotProps.useInput === 'function' ? slotProps.useInput : null;
+  const liveSlotInput = useInputHook ? useInputHook((state) => state) : slotProps.input;
   const composerDraft =
-    slotProps.input && typeof slotProps.input.draft === 'string' ? slotProps.input.draft : '';
+    liveSlotInput && typeof liveSlotInput.draft === 'string'
+      ? liveSlotInput.draft
+      : slotProps.input && typeof slotProps.input.draft === 'string'
+        ? slotProps.input.draft
+        : '';
   const draftReady = composerDraft.trim() !== '';
 
   /* Switching conversations must never keep a stale overlay or selection. */
