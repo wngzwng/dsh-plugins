@@ -1535,10 +1535,13 @@ function createWorkspaceComponents(React) {
       '.kt-card:hover .kt-card-del,.kt-card-del:focus-visible{opacity:1}',
       '.kt-card-del:hover{color:var(--dsw-alias-state-error-primary);background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 12%,transparent)}',
       '.kt-card-body{display:flex;flex-direction:column;gap:6px;padding:0 10px 10px}',
-      '.kt-inline-confirm{display:inline-flex;flex:none;align-items:center;gap:2px}',
-      '.kt-inline-confirm .kt-text-btn{font-size:11.5px;padding:0 4px;white-space:nowrap}',
-      '.kt-confirm-del{height:22px;padding:0 8px;border-radius:7px;border:.5px solid color-mix(in srgb,var(--dsw-alias-state-error-primary) 45%,var(--dsw-alias-border-l1));background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 10%,transparent);color:var(--dsw-alias-state-error-primary);font:inherit;font-size:11.5px;line-height:20px;cursor:pointer;white-space:nowrap}',
-      '.kt-confirm-del:hover{background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 20%,transparent)}',
+      '.kt-card-confirming{border-color:color-mix(in srgb,var(--dsw-alias-state-error-primary) 42%,var(--dsw-alias-border-l1));background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 5%,var(--dsw-alias-bg-layer-1))}',
+      '.kt-card-confirming .kt-card-title{color:var(--dsw-alias-label-secondary)}',
+      '.kt-inline-confirm{display:inline-flex;flex:none;align-items:center;gap:2px;margin-left:auto}',
+      '.kt-inline-confirm .kt-text-btn{border:0;border-radius:6px;background:transparent;box-shadow:none;height:22px;font-size:11.5px;line-height:22px;color:var(--dsw-alias-label-secondary);padding:0 7px;white-space:nowrap}',
+      '.kt-inline-confirm .kt-text-btn:hover{background:transparent;color:var(--dsw-alias-label-primary);text-decoration:underline}',
+      '.kt-inline-confirm .kt-confirm-del{border:0;border-radius:6px;background:transparent;box-shadow:none;height:22px;padding:0 7px;color:var(--dsw-alias-state-error-primary);font:inherit;font-size:11.5px;line-height:22px;cursor:pointer;white-space:nowrap}',
+      '.kt-inline-confirm .kt-confirm-del:hover{background:transparent;text-decoration:underline}',
       '.kt-trow-confirming .kt-trow-actions{opacity:1}',
       '.kt-img-panel{display:flex;flex-direction:column;gap:4px}',
       '.kt-img-drop{display:block;width:100%;box-sizing:border-box;padding:8px 10px;border:.5px dashed var(--dsw-alias-border-l2);border-radius:9px;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:11.5px;line-height:16px;text-align:center;cursor:pointer}',
@@ -1687,6 +1690,26 @@ function createWorkspaceComponents(React) {
       '.kt-bcard-actions{flex:none;display:flex;flex-wrap:wrap;gap:3px 10px}',
       '.kt-bcard-body{gap:6px}',
       '.kt-meta-row{gap:6px 14px}',
+      /* Host pages wrap plugin content in `.ktw`, whose generic button/input rules
+         outrank our single-class selectors. Re-assert our own chrome one level up. */
+      '.kt-page .kt-btn{box-sizing:border-box;height:30px;padding:0 12px;border:.5px solid var(--dsw-alias-border-l1);border-radius:9px;background:transparent}',
+      '.kt-page .kt-btn-primary{border-color:transparent;background:color-mix(in srgb,var(--dsw-alias-brand-primary) 16%,transparent)}',
+      '.kt-page .kt-btn-brand{border-color:color-mix(in srgb,var(--dsw-alias-brand-primary) 40%,var(--dsw-alias-border-l1));background:transparent}',
+      '.kt-page .kt-btn-danger{border-color:color-mix(in srgb,var(--dsw-alias-state-error-primary) 45%,var(--dsw-alias-border-l1));background:transparent}',
+      '.kt-page .kt-text-btn{padding:0 4px;border:0;border-radius:5px;background:transparent}',
+      '.kt-page .kt-icon-btn{box-sizing:border-box;padding:0;border:.5px solid var(--dsw-alias-border-l1);border-radius:9px;background:var(--dsw-alias-bg-layer-1)}',
+      '.kt-page .kt-mini-btn{box-sizing:border-box;padding:0;border:0;border-radius:6px;background:transparent}',
+      '.kt-page .kt-card-del{box-sizing:border-box;padding:0;border:0;border-radius:6px;background:transparent}',
+      '.kt-page .kt-seg-btn{padding:0 10px;border:0;border-radius:7px;background:transparent}',
+      '.kt-page .kt-menu-item{padding:7px 10px;border:0;border-radius:7px;background:transparent}',
+      '.kt-page .kt-attach-item{padding:7px 9px;border:0;border-radius:8px;background:transparent}',
+      '.kt-page .kt-img-drop{padding:8px 10px;border:.5px dashed var(--dsw-alias-border-l2);border-radius:9px;background:transparent}',
+      '.kt-page .kt-lightbox-close{box-sizing:border-box;width:34px;height:34px;padding:0;border:.5px solid color-mix(in srgb,#fff 30%,transparent);border-radius:9px;background:color-mix(in srgb,#000 30%,transparent)}',
+      '.kt-page .kt-input{box-sizing:border-box;border:.5px solid var(--dsw-alias-border-l1);border-radius:9px;background:var(--dsw-alias-bg-layer-1);padding:0 11px}',
+      '.kt-page .kt-textarea{border:.5px solid var(--dsw-alias-border-l1);border-radius:9px;background:var(--dsw-alias-bg-layer-1);padding:8px 11px}',
+      '.kt-page .kt-card-input{border:0;border-radius:0;background:transparent;padding:0}',
+      '.kt-page .kt-tree-title{border:0;border-bottom:.5px dashed transparent;border-radius:0;background:transparent;padding:0 2px}',
+      '.kt-page .kt-input:focus-visible,.kt-page .kt-textarea:focus-visible,.kt-page .kt-card-input:focus-visible,.kt-page .kt-tree-title:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}',
       '.kt-icon-btn:focus-visible,.kt-btn:focus-visible,.kt-text-btn:focus-visible,.kt-mini-btn:focus-visible,.kt-input:focus-visible,.kt-textarea:focus-visible,.kt-card-head:focus-visible,.kt-bcard:focus-visible,.kt-trow:focus-visible,.kt-trow-title:focus-visible,.kt-seg-btn:focus-visible,.kt-menu-item:focus-visible,.kt-tree-title:focus-visible,.kt-attach-item:focus-visible,.kt-dialog .kt-btn:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}',
       '@media (max-width:820px){.kt-board-hint{display:none}}',
       '@media (max-width:760px){.kt-toolbar-right{margin-left:0;flex-wrap:wrap}.kt-head-actions{flex-wrap:wrap}.kt-summary{font-size:11.5px}}',
@@ -3831,7 +3854,13 @@ function createWorkspaceComponents(React) {
         const open = expanded.has(card.id);
         return h(
           'div',
-          { className: 'kt-card' + (open ? ' kt-card-open' : ''), key: card.id },
+          {
+            className:
+              'kt-card' +
+              (open ? ' kt-card-open' : '') +
+              (deleteTarget === card.id ? ' kt-card-confirming' : ''),
+            key: card.id,
+          },
           h(
             'div',
             {
@@ -3849,14 +3878,6 @@ function createWorkspaceComponents(React) {
               },
             },
             h('span', { className: 'kt-card-title', title: card.title }, card.title),
-            card.content !== ''
-              ? h('span', { className: 'kt-badge' }, t('tr.content'))
-              : null,
-            h(
-              'span',
-              { className: 'kt-card-chevron', title: open ? t('card.collapse') : t('card.expand') },
-              open ? '▴' : '▾',
-            ),
             deleteTarget === card.id
               ? h(InlineConfirm, {
                   t,
@@ -3869,18 +3890,33 @@ function createWorkspaceComponents(React) {
                   onCancel: () => setDeleteTarget(null),
                 })
               : h(
-                  'button',
-                  {
-                    type: 'button',
-                    className: 'kt-card-del',
-                    'aria-label': t('tr.delete'),
-                    title: t('tr.delete'),
-                    onClick: (event) => {
-                      event.stopPropagation();
-                      setDeleteTarget(card.id);
+                  React.Fragment,
+                  null,
+                  card.content !== ''
+                    ? h('span', { className: 'kt-badge' }, t('tr.content'))
+                    : null,
+                  h(
+                    'span',
+                    {
+                      className: 'kt-card-chevron',
+                      title: open ? t('card.collapse') : t('card.expand'),
                     },
-                  },
-                  h(Icon, { name: 'close', size: 12 }),
+                    open ? '▴' : '▾',
+                  ),
+                  h(
+                    'button',
+                    {
+                      type: 'button',
+                      className: 'kt-card-del',
+                      'aria-label': t('tr.delete'),
+                      title: t('tr.delete'),
+                      onClick: (event) => {
+                        event.stopPropagation();
+                        setDeleteTarget(card.id);
+                      },
+                    },
+                    h(Icon, { name: 'close', size: 12 }),
+                  ),
                 ),
           ),
           open
