@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { readFile } from 'node:fs/promises';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { createWorkspaceComponents } from '../knowledge-tree/workspace-ui.js';
@@ -313,4 +314,14 @@ test('delete requires inline confirmation and never calls remote deletion', asyn
   assert.equal(h.records.size, 0);
   assert.equal(h.snapshots.length, 1);
   assert.equal(h.calls.some((call) => /delete/i.test(call.method)), false);
+});
+
+test('workspace chrome css never leaks into the embedded editor (.kt-page subtree)', async () => {
+  const source = await readFile(new URL('../knowledge-tree/workspace-ui.js', import.meta.url), 'utf8');
+  const selectors = ['.ktw *', '.ktw button', '.ktw input', '.ktw textarea', '.ktw img', '.ktw label', '.ktw h2', '.ktw h3'];
+  for (const selector of selectors) {
+    const pattern = new RegExp(selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?!:not\\(\\.kt-page \\*\\))', 'g');
+    const unscoped = source.match(pattern) || [];
+    assert.equal(unscoped.length, 0, `${selector} must exclude .kt-page descendants`);
+  }
 });
