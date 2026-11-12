@@ -197,51 +197,9 @@ node build-client.mjs          # 把 core.js 与 src/*.js 嵌入 client.js
 安装后如界面没有立即变化，重启 DSH 或刷新页面。左侧栏出现「提示库」图标；会话输入框工具区
 出现「提示库」快捷入口。卸载插件不会删除浏览器里的数据（重新安装可见）。
 
-## 开发与测试
+## 开发
 
-目录结构见 `DESIGN.md` §1。构建与测试（无 npm 依赖）：
-
-```bash
-cd prompt-library && node build-client.mjs && cd ..
-node --check prompt-library/client.js
-node --check prompt-library/index.js
-node --check prompt-library/core.js
-node --test tests/prompt-library-*.test.js   # core / host / panel / quick
-node --test tests/*.test.js                  # 全仓库回归（不破坏既有插件）
-```
-
-- `core.js`：纯数据逻辑（评分有效性、排序、搜索、CSV/JSON、AI 字数校验），可独立测试。
-- `index.js`：Host 半，注册 `GET /dsh-prompt-library/ai/status` 与
-  `POST /dsh-prompt-library/ai/review`；校验 Origin/Host、限制并发与超时、校验字数。
-- `client.js`：浏览器半骨架 + 共享 store/组件；`src/full-panel.js`、`src/quick-picker.js`
-  为可编辑 UI 片段，由 `build-client.mjs` 嵌入。
-
-## 验证结果（自动化测试）
-
-仓库内无 npm 依赖的测试（`node:test` + 假 window/document/locale/fetch 与递归 React 渲染器，
-直接加载构建后的 `client.js` 渲染真实组件树）：
-
-| 文件 | 覆盖 | 结果 |
-| --- | --- | --- |
-| `tests/prompt-library-core.test.js` | 评分合法性/有效/待复评、正文版本、默认/显式/评分排序、recent 严格排序、搜索与组合筛选、标签 trim/重名/排序、CSV 往返与公式防护、CSV 导入预览、JSON 备份校验/合并/替换、200 可见字符校验 | 47/47 |
-| `tests/prompt-library-host.test.js` | 假 ctx 的两条路由：模型解析、请求只含 title/body/usage、无 tools/session、最低 reasoning effort 选择与缓存、超 200 压缩一次、空/错误/截断/超长/超时/并发上限/Origin 403、日志与响应不泄漏正文/密钥 | 28/28 |
-| `tests/prompt-library-panel.test.js` | 整页面板（含收件箱/整理状态/来源元数据/快速收录入口）：首用/空态、新建必填、编辑未保存确认、删除与标签删除二次确认、标签管理、收藏/置顶、排序与筛选、半星评分/备注/待复评/沿用、AI 状态/成功/失败/过期/草稿关联、复制与用后评分、CSV/JSON 导入预览与替换确认、导出/分享、corrupt/storage-error、窄窗口、i18n 与无障碍 | 28/28 |
-| `tests/prompt-library-capture-core.test.js` | 自动标题（首个非空行/去掉 markdown 标记/40 可见字符含省略号/不修改正文）、重复判定（exact vs 仅首尾空白/CRLF 的 near；内部空格与大小写不误判）、organize 迁移与切换不改 updatedAt、capture 规范化、收件箱过滤、CSV 新列与旧文件兼容、JSON 保留新元数据 | 30/30 |
-| `tests/prompt-library-quick.test.js` | 快捷入口：分类页签（全部/置顶/收藏/最近使用）、计数与键盘切换、搜索、复制/插入成功与失败、无插入接口降级、用后评分、键盘、Esc、会话切换安全、空态/无结果、i18n、存草稿快照与空禁用、useInput 实时草稿订阅、选区收录、收录入口 payload/busy、面板与收录弹层关闭后不复现 tooltip | 36/36 |
-| `tests/prompt-library-integration.test.js` | 三个槽位注册、中英字典 parity、样式注入与卸载清理、corrupt/新版本/不可用存储不被覆盖、跨标签页刷新、layout 打开整页、下载内容、备注自动保存、Markdown 预览开关/安全渲染/原文复制与偏好持久化、快速收录（粘贴/整份草稿/对话选区/自动标题与手动改写/撤回自动标题/清空标题/重复 exact+near/仍然另存/连续收录/保存失败/IME/Esc/防双提交/来源会话快照/收件箱与来源元数据/查看跳转） | 37/37 |
-
-全量回归：`node prompt-library/build-client.mjs && node --test tests/*.test.js`
-→ **提示库 220/220 通过**（core 47、host 28、capture-core 30、panel 42、quick 36、integration 37）。整仓库同时运行时会包含工作区中尚未提交的 knowledge-tree 在建改动，其失败与提示库无关。
-另有 `node --check` 覆盖 `client.js`、`core.js`、`index.js`、两个 UI 片段。
-
-**已验证**：上述自动化行为（含 localStorage 持久化、复制/插入 API 调用与拒绝路径、评分版本、
-CSV/JSON 往返、AI Host 请求与错误路径、字典/主题 token/卸载清理）。
-另外在真实 DSH 0.2.2-rc.1（本机安装后）实测：`GET .../ai/status` 返回默认模型
-`deepseek-account / deepseek-flash`；`POST .../ai/review` 成功返回 96 个可见字符的评审（1.3s），
-空标题 400、跨站 Origin 403；修复「思考 token 占满预算导致 TRUNCATED」后回归通过。
-**未验证（环境限制，未安装插件/未改 DSH profile）**：真实 DSH GUI 中的最终视觉效果与真实
-`inputActions`/模型调用；测试用同签名假实现覆盖，接口以 DSH 0.2.2-rc.1 公开文档与已安装插件
-（dsh-prompt-optimizer 的 `webServer.register` + `ctx.llm.stream`）为准。
+构建、测试与实现细节见 [`DESIGN.md`](DESIGN.md)。
 
 ## 已知限制与兼容性
 
