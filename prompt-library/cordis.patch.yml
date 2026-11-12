@@ -3,4 +3,4 @@
 # optional AI-review bridge that reuses the configured DSH model service.
 - insert:
     - id: prompt-library
-      name: '@local/prompt-library'
+      name: '@wngzwng/dsh-prompt-library'

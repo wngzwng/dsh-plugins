@@ -18,7 +18,7 @@
  * (plain declarations in this same factory scope; no imports).
  */
 window.__ModuleLoader__.load({
-  id: '@local/prompt-library',
+  id: '@wngzwng/dsh-prompt-library',
   factory(require) {
     const React = require('react');
     const h = React.createElement;

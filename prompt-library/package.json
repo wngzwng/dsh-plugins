@@ -1,7 +1,6 @@
 {
-  "name": "@local/prompt-library",
+  "name": "@wngzwng/dsh-prompt-library",
   "version": "1.0.0",
-  "private": true,
   "description": "Prompt Library for the DeepSeek Harness Web UI: save, tag, rate, search and reuse prompts from a sidebar page and a quick picker beside the composer. Local browser storage, CSV / JSON backup, optional host-side AI review with an explicit model notice.",
   "type": "module",
   "scripts": {
@@ -46,6 +45,23 @@
   },
   "engines": {
     "node": ">=22.19.0",
-    "dsh": "0.2.2-rc.1"
-  }
+    "dsh": ">=0.2.2-rc.1 <0.3.0"
+  },
+  "license": "MIT",
+  "author": {
+    "name": "wngzwng",
+    "url": "https://github.com/wngzwng"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wngzwng/dsh-prompt-library.git"
+  },
+  "homepage": "https://github.com/wngzwng/dsh-prompt-library",
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "prompt-library",
+    "prompts",
+    "prompt-manager"
+  ]
 }

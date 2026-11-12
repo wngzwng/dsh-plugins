@@ -163,7 +163,7 @@ AI 辅助评价由用户主动触发，复用 DSH 已配置的模型服务，仅
 - 可选固定模型（编辑 `~/.dsh/profiles/<profile>/cordis.patch.yml` 中本插件行）：
   ```yaml
   - id: prompt-library
-    name: '@local/prompt-library'
+    name: '@wngzwng/dsh-prompt-library'
     config:
       provider: deepseek-account
       model: deepseek-flash
@@ -173,14 +173,25 @@ AI 辅助评价由用户主动触发，复用 DSH 已配置的模型服务，仅
 
 ## 安装
 
-前置：已安装 DSH，`plugin_manager` 可用。本仓库每个插件目录都是独立 bundle。
+前置：已安装 DSH（`0.2.2-rc.1` 及以上、`0.3.0` 以下）。
+
+**从插件市场安装（推荐）**：在 DSH 的「插件市场」中搜索「提示库」，一键安装。
+
+**手动安装**：从 [Releases](https://github.com/wngzwng/dsh-prompt-library/releases) 下载
+`wngzwng-dsh-prompt-library-1.0.0.tgz`，然后：
 
 ```bash
-# 在仓库根目录
-# 1) 构建浏览器半（把 core.js 与 src/*.js 嵌入 client.js）
-node prompt-library/build-client.mjs
-# 2) 在 DSH 中安装本目录（会话里让 Agent 执行，或 Plugin Manager 选择目录）
-#    plugin_manager install_bundle target: <仓库绝对路径>/prompt-library
+dsh plugin --profile web add https://github.com/wngzwng/dsh-prompt-library/releases/download/1.0.0/wngzwng-dsh-prompt-library-1.0.0.tgz
+```
+
+**从源码开发**：
+
+```bash
+git clone https://github.com/wngzwng/dsh-prompt-library.git
+cd dsh-prompt-library
+node build-client.mjs          # 把 core.js 与 src/*.js 嵌入 client.js
+# 在 DSH 中安装本目录（会话里让 Agent 执行，或 Plugin Manager 选择目录）
+#   plugin_manager install_bundle target: <仓库绝对路径>
 ```
 
 安装后如界面没有立即变化，重启 DSH 或刷新页面。左侧栏出现「提示库」图标；会话输入框工具区
@@ -265,3 +276,7 @@ Quick capture saves pasted text, the whole composer draft, or selected chat text
 auto title, duplicate warnings and independent source metadata. An optional, user-triggered AI review
 uses the DSH model service on the Host half only (no keys in the browser) and is shown as a
 clearly-labelled reference, never as a personal rating.
+
+## 许可证
+
+[MIT](LICENSE) © 2026 wngzwng
