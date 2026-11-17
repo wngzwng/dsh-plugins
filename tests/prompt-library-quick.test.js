@@ -732,6 +732,22 @@ test('QUICK_PICKER_CSS provides the mobile layout and theme tokens', () => {
   assert.ok(source.includes('.plq-draft-entry'), 'composer save-draft entry styles');
 });
 
+test('quick picker rows do not shrink inside a long scrollable list', () => {
+  // 28 rows reproduced the bug in Chromium: default flex-shrink:1 reduced
+  // each row to 44px, collapsed the title to 0px and let tags cross its border.
+  // Keep this contract in both authored and generated CSS; the list scrolls.
+  for (const path of ['../prompt-library/src/quick-picker.js', '../prompt-library/client.js']) {
+    const source = readFileSync(new URL(path, import.meta.url), 'utf8');
+    const rowRule = source.match(/\.plq-row\{([^}]+)\}/);
+    assert.ok(rowRule, path + ': row rule exists');
+    assert.match(rowRule[1], /(?:^|;)flex-shrink:0(?:;|$)/, path + ': rows retain their natural height');
+    const listRule = source.match(/\.plq-list\{([^}]+)\}/);
+    assert.ok(listRule, path + ': list rule exists');
+    assert.match(listRule[1], /overflow:auto/, 'overflow scrolls instead of compressing rows');
+    assert.match(listRule[1], /max-height:/, 'list stays height-capped');
+  }
+});
+
 /* ------------------------------------------------------------------ */
 /* Quick-capture fixtures (DESIGN.md §9)                               */
 /* ------------------------------------------------------------------ */

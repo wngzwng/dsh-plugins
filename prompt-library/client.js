@@ -5813,7 +5813,9 @@ const QUICK_PICKER_CSS = [
   '.plq-section{margin:0 0 6px}',
   '.plq-section-head{display:flex;align-items:center;gap:6px;margin:0;padding:6px 8px 4px;font-size:11.5px;font-weight:600;letter-spacing:.02em;color:var(--dsw-alias-label-secondary)}',
   '.plq-section-count{font-weight:500;color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums}',
-  '.plq-row{display:flex;flex-direction:column;align-items:stretch;gap:4px;width:100%;min-height:44px;padding:7px 9px;border:.5px solid transparent;border-radius:9px;background:transparent;color:var(--dsw-alias-label-primary);font:inherit;text-align:left;cursor:pointer}',
+  // Rows must keep their content height inside the capped, scrollable flex list.
+  // Otherwise flex-shrink squeezes titles to zero and tags escape the selection border.
+  '.plq-row{display:flex;flex-shrink:0;flex-direction:column;align-items:stretch;gap:4px;width:100%;min-height:44px;padding:7px 9px;border:.5px solid transparent;border-radius:9px;background:transparent;color:var(--dsw-alias-label-primary);font:inherit;text-align:left;cursor:pointer}',
   '.plq-row:hover{background:color-mix(in srgb,var(--dsw-alias-label-secondary) 9%,transparent)}',
   '.plq-row:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}',
   '.plq-row-selected{border-color:var(--dsw-alias-brand-primary);background:color-mix(in srgb,var(--dsw-alias-brand-primary) 9%,transparent)}',
