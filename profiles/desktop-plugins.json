@@ -1,0 +1,32 @@
+{
+  "snapshotDate": "2026-11-20",
+  "profile": "desktop",
+  "dshVersion": "0.2.2-rc.3",
+  "enabledBundles": [
+    {"name":"@local/pomodoro-clock", "version":"1.0.1", "dir":"pomodoro-clock", "purpose":"番茄钟与休息提醒"},
+    {"name":"@local/life-grid", "version":"1.0.0", "dir":"life-grid", "purpose":"人生九宫格与年度规划"},
+    {"name":"@local/todo-list", "version":"1.1.3", "dir":"todo-list", "purpose":"待办清单与分组"},
+    {"name":"@local/knowledge-tree", "version":"2.3.0", "dir":"knowledge-tree", "purpose":"知识树与 GitHub 同步"},
+    {"name":"@local/prompt-library", "packageName":"@wngzwng/dsh-prompt-library", "version":"1.0.0", "dir":"prompt-library", "purpose":"收藏、整理与复用提示词"},
+    {"name":"@y1x1n/dsh-prompt-optimizer", "version":"0.6.2", "archive":"y1x1n-dsh-prompt-optimizer-0.6.2.tgz", "sha256":"0a3321189c1a4540597fdff3400420415c26f4becb391893dbc71cda4c0a8306", "purpose":"优化当前提示词"},
+    {"name":"@local/session-watch", "version":"1.2.3", "archive":"local-session-watch-1.2.3.tgz", "sha256":"c9d6c09e5b8a187a6bfb999c3552104244e345c4278d2439f089a33e7431808b", "purpose":"跨工作区关注会话、分屏与审批"},
+    {"name":"dsh-prompt", "version":"0.4.41", "purpose":"提示词模板工具箱"},
+    {"name":"dsh-connect-workbuddy", "version":"5.21.2", "purpose":"接入 WorkBuddy 模型与积分"},
+    {"name":"dsh-codex-subscription", "version":"3.2.11", "purpose":"接入 ChatGPT 与 Codex 订阅"},
+    {"name":"@deepseek-ai/dsh-subagent-codex", "version":"0.2.2-rc.3", "purpose":"调用 Codex 子代理"},
+    {"name":"@mars-sea/dsh-commandcode-provider", "version":"0.17.6", "purpose":"接入 Command Code 模型"},
+    {"name":"dsh-cost-meter", "version":"1.9.67", "purpose":"会话费用和订阅额度"},
+    {"name":"dsh-context", "version":"0.83.0", "purpose":"查看上下文的组成和变化"},
+    {"name":"dsh-memory-palace", "version":"1.8.5", "purpose":"用户级和项目级 Markdown 记忆"},
+    {"name":"dsh-ego-browser", "version":"0.13.0", "purpose":"代理浏览器与操作观察窗"},
+    {"name":"dsh-genui", "version":"0.3.3", "purpose":"回复内交互式界面"},
+    {"name":"dsh-ops", "version":"0.5.5", "purpose":"原生文件和 PTC 工具"},
+    {"name":"@ace-zone/dsh-market", "version":"0.1.66", "purpose":"社区插件市场"},
+    {"name":"universal-plugin-hub", "version":"1.3.1", "purpose":"管理跨生态插件、技能和 MCP"}
+  ],
+  "enabledBuiltins": [
+    {"name":"@deepseek-ai/dsh-experimental-cot-translation-bundle", "purpose":"推理内容翻译"},
+    {"name":"@deepseek-ai/dsh-experimental-session-search", "purpose":"历史会话搜索"},
+    {"name":"@deepseek-ai/dsh-experimental-plugin-market-bundle", "purpose":"插件市场发现页"}
+  ]
+}
