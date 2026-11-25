@@ -1224,6 +1224,26 @@ function createWorkspaceComponents(React) {
         'tr.addChild': 'Add child',
         'tr.addChildPlaceholder': 'New child…',
         'tr.content': 'Content',
+        'md.edit': 'Edit content',
+        'md.write': 'Write content',
+        'md.editHint': 'Saves on blur · Ctrl/⌘+Enter to finish',
+        'md.detail': 'Details',
+        'drawer.title': 'Card details',
+        'drawer.close': 'Close details',
+        'drawer.kids': '{count} child item(s)',
+        'drawer.refs': '{count} more reference(s)',
+        'ed.expand': 'Expand editor',
+        'ed.edit': 'Edit',
+        'ed.title': 'Edit card',
+        'ed.close': 'Close editor',
+        'ed.titleLabel': 'Title',
+        'ed.contentLabel': 'Content',
+        'ed.tabEdit': 'Write',
+        'ed.tabPreview': 'Preview',
+        'ed.hint': 'Ctrl/⌘+Enter to save · Esc to cancel',
+        'ed.discard': 'Discard unsaved changes?',
+        'ed.keep': 'Keep editing',
+        'ed.discardYes': 'Discard',
         'tr.contentPlaceholder': 'Why it belongs here (optional)',
         'tr.editContent': 'Edit content',
         'pc.deleteCard': 'Delete this card?',
@@ -1428,6 +1448,26 @@ function createWorkspaceComponents(React) {
         'tr.addChild': '加子项',
         'tr.addChildPlaceholder': '新子项…',
         'tr.content': '内容',
+        'md.edit': '编辑正文',
+        'md.write': '写正文',
+        'md.editHint': '失焦自动保存 · Ctrl/⌘+Enter 完成',
+        'md.detail': '详情',
+        'drawer.title': '卡片详情',
+        'drawer.close': '关闭详情',
+        'drawer.kids': '{count} 个子项',
+        'drawer.refs': '另关联 {count} 处',
+        'ed.expand': '展开编辑',
+        'ed.edit': '编辑',
+        'ed.title': '编辑卡片',
+        'ed.close': '关闭编辑器',
+        'ed.titleLabel': '标题',
+        'ed.contentLabel': '正文',
+        'ed.tabEdit': '编写',
+        'ed.tabPreview': '预览',
+        'ed.hint': 'Ctrl/⌘+Enter 保存 · Esc 取消',
+        'ed.discard': '放弃未保存的修改？',
+        'ed.keep': '继续编辑',
+        'ed.discardYes': '放弃',
         'tr.contentPlaceholder': '为什么它属于这里（可选）',
         'tr.editContent': '编辑内容',
         'pc.deleteCard': '删除这张卡片？',
@@ -1572,6 +1612,53 @@ function createWorkspaceComponents(React) {
       '.kt-lightbox img{max-width:min(1100px,92vw);max-height:88vh;border-radius:10px;background:var(--dsw-alias-bg-base);cursor:default}',
       '.kt-lightbox-close{position:absolute;top:16px;right:20px;width:34px;height:34px;border:.5px solid color-mix(in srgb,#fff 30%,transparent);border-radius:9px;background:color-mix(in srgb,#000 30%,transparent);color:#fff;font-size:20px;line-height:1;cursor:pointer}',
       '.kt-card-content{font-size:12.5px;line-height:19px;color:var(--dsw-alias-label-secondary);white-space:pre-wrap;word-break:break-word}',
+      '.kt-md{color:var(--dsw-alias-label-secondary);font-size:12.5px;line-height:19px;overflow-wrap:anywhere}',
+      '.kt-md>:first-child{margin-top:0}',
+      '.kt-md>:last-child{margin-bottom:0}',
+      '.kt-md-p{margin:0 0 6px}',
+      '.kt-md-h{margin:10px 0 5px;color:var(--dsw-alias-label-primary);line-height:1.35;font-weight:600}',
+      '.kt-md-h1{font-size:15px}',
+      '.kt-md-h2{font-size:14px}',
+      '.kt-md-h3{font-size:13.5px}',
+      '.kt-md-h4,.kt-md-h5,.kt-md-h6{font-size:13px}',
+      '.kt-md-list{margin:0 0 6px;padding-left:18px}',
+      '.kt-md-list-sub{margin:2px 0 0}',
+      '.kt-md-li{margin:1px 0}',
+      '.kt-md-quote{margin:0 0 6px;padding:2px 0 2px 10px;border-left:2px solid var(--dsw-alias-border-l2)}',
+      '.kt-md-pre{margin:0 0 8px;padding:8px 10px;border-radius:8px;background:var(--dsw-alias-bg-layer-2);overflow-wrap:anywhere;font-size:11.5px;line-height:17px}',
+      '.kt-md-codeblock{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere}',
+      '.kt-md-code{padding:1px 4px;border-radius:4px;background:color-mix(in srgb,var(--dsw-alias-label-primary) 8%,transparent);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.92em}',
+      '.kt-md-link{color:var(--dsw-alias-brand-primary);text-decoration:underline;text-underline-offset:2px}',
+      '.kt-md-hr{margin:10px 0;border:0;border-top:.5px solid var(--dsw-alias-border-l1)}',
+      '.kt-md-drawer{font-size:13px;line-height:21px;color:var(--dsw-alias-label-primary)}',
+      '.kt-md-card{max-height:240px;overflow:auto;padding-right:2px}',
+      '.kt-card-actions-row{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px}',
+      '.kt-hint-inline{font-size:11px;line-height:16px;color:var(--dsw-alias-label-secondary)}',
+      '.kt-graph-detail-actions{margin-top:6px}',
+      '.kt-drawer-overlay{position:fixed;inset:0;z-index:55;display:flex;justify-content:flex-end;background:color-mix(in srgb,#000 28%,transparent)}',
+      '.kt-drawer{box-sizing:border-box;width:min(440px,92vw);height:100%;display:flex;flex-direction:column;background:var(--dsw-alias-bg-base);border-left:.5px solid var(--dsw-alias-border-l1);box-shadow:-8px 0 28px color-mix(in srgb,#000 14%,transparent)}',
+      '.kt-drawer-head{flex:none;display:flex;align-items:flex-start;gap:10px;padding:16px 16px 10px;border-bottom:.5px solid var(--dsw-alias-border-l1)}',
+      '.kt-drawer-titles{flex:1;min-width:0}',
+      '.kt-drawer-title{margin:0;font-size:15px;line-height:22px;font-weight:600;overflow-wrap:anywhere}',
+      '.kt-drawer-meta{margin:3px 0 0;font-size:11.5px;line-height:17px;color:var(--dsw-alias-label-secondary)}',
+      '.kt-drawer-scroll{flex:1;min-height:0;overflow:auto;padding:14px 16px 20px;display:flex;flex-direction:column;gap:10px}',
+      '.kt-drawer-img{display:block;max-width:100%;max-height:240px;object-fit:contain;align-self:flex-start;border:.5px solid var(--dsw-alias-border-l1);border-radius:10px;background:var(--dsw-alias-bg-layer-2);cursor:zoom-in}',
+      '.kt-editor-overlay{position:fixed;inset:0;z-index:58;display:flex;align-items:center;justify-content:center;padding:24px;background:color-mix(in srgb,#000 36%,transparent)}',
+      '.kt-editor{box-sizing:border-box;width:min(880px,94vw);height:min(720px,90vh);display:flex;flex-direction:column;border:.5px solid var(--dsw-alias-border-l1);border-radius:16px;background:var(--dsw-alias-bg-base);box-shadow:0 18px 48px color-mix(in srgb,#000 22%,transparent);overflow:hidden}',
+      '.kt-editor-head{flex:none;display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:.5px solid var(--dsw-alias-border-l1)}',
+      '.kt-editor-head .kt-input{flex:1}',
+      '.kt-editor-tabs{flex:none;display:flex;align-items:center;gap:10px;padding:9px 14px 0}',
+      '.kt-editor-count{margin-left:auto;font-size:11px;line-height:16px;color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums}',
+      '.kt-editor-body{flex:1;min-height:0;display:flex;flex-direction:column;padding:10px 14px 12px}',
+      '.kt-editor-area{flex:1;min-height:0;width:100%;box-sizing:border-box;resize:none;padding:12px 14px;border:.5px solid var(--dsw-alias-border-l1);border-radius:10px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font:inherit;font-size:13px;line-height:21px}',
+      '.kt-editor-area:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}',
+      '.kt-editor-preview{flex:1;min-height:0;overflow:auto;padding:2px 2px 0}',
+      '.kt-editor-foot{flex:none;display:flex;align-items:center;gap:8px;padding:10px 14px;border-top:.5px solid var(--dsw-alias-border-l1)}',
+      '.kt-editor-hint{font-size:11.5px;line-height:17px;color:var(--dsw-alias-label-secondary)}',
+      '.kt-editor-spacer{flex:1}',
+      '.kt-editor-warn{flex:1;font-size:12px;line-height:18px;color:var(--dsw-alias-state-warn-primary)}',
+      '@media (max-width:620px){.kt-editor-overlay{padding:10px}.kt-editor{width:100%;height:92vh}}',
+      '@media (max-width:560px){.kt-drawer{width:100%}}',
       '.kt-empty{margin:0;padding:18px 0;color:var(--dsw-alias-label-secondary);font-size:13px}',
       '.kt-meta-row{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding-top:8px;border-top:.5px solid var(--dsw-alias-border-l1);color:var(--dsw-alias-label-secondary);font-size:12px}',
       /* whiteboard */
@@ -3728,6 +3815,278 @@ function createWorkspaceComponents(React) {
       );
     }
 
+    const MD_SAFE_URL = /^(?:https?:\/\/|mailto:)/i;
+    const MD_INLINE = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(__[^_\n]+__)|(~~[^~\n]+~~)|(\*[^*\n]+\*)|(_[^_\n]+_)|(\[[^\]\n]*\]\([^)\s]+\))|(https?:\/\/[^\s<]+)/g;
+
+    function mdInline(text, keyBase) {
+      const source = String(text === undefined || text === null ? '' : text);
+      if (source === '') return [];
+      const nodes = [];
+      let last = 0;
+      let index = 0;
+      let match;
+      MD_INLINE.lastIndex = 0;
+      while ((match = MD_INLINE.exec(source)) !== null) {
+        if (match.index > last) nodes.push(source.slice(last, match.index));
+        const token = match[0];
+        const key = keyBase + '-' + index++;
+        if (match[1]) {
+          nodes.push(h('code', { key, className: 'kt-md-code' }, token.slice(1, -1)));
+        } else if (match[2] || match[3]) {
+          nodes.push(h('strong', { key }, token.slice(2, -2)));
+        } else if (match[4]) {
+          nodes.push(h('del', { key }, token.slice(2, -2)));
+        } else if (match[5] || match[6]) {
+          nodes.push(h('em', { key }, token.slice(1, -1)));
+        } else if (match[7]) {
+          const link = /^\[([^\]]*)\]\(([^)\s]+)\)$/.exec(token);
+          if (link !== null && MD_SAFE_URL.test(link[2])) {
+            nodes.push(h('a', { key, className: 'kt-md-link', href: link[2], target: '_blank', rel: 'noopener noreferrer' }, link[1] === '' ? link[2] : link[1]));
+          } else if (link !== null) {
+            nodes.push(link[1] === '' ? link[2] : link[1]);
+          } else {
+            nodes.push(token);
+          }
+        } else {
+          const url = token.replace(/[.,;:!?]+$/, '');
+          nodes.push(h('a', { key, className: 'kt-md-link', href: url, target: '_blank', rel: 'noopener noreferrer' }, url));
+        }
+        last = match.index + token.length;
+      }
+      if (last < source.length) nodes.push(source.slice(last));
+      return nodes;
+    }
+
+    const MD_ITEM = /^(\s*)([-*+]|\d+[.)])\s+(.*)$/;
+    const MD_HEADING = /^\s{0,3}(#{1,6})\s+(.*)$/;
+    const MD_HR = /^\s{0,3}([-*_])(\s*\1){2,}\s*$/;
+    const MD_QUOTE = /^\s{0,3}>\s?/;
+    const MD_FENCE = /^\s{0,3}```(.*)$/;
+    const MD_STARTS = /^\s{0,3}(#{1,6}\s|>|```|([-*+]|\d+[.)])\s)/;
+    const mdIndent = (line) => (line.match(/^\s*/) || [''])[0].length;
+    const mdBlank = (line) => /^\s*$/.test(line);
+
+    function mdList(lines, start, path, counter) {
+      const base = mdIndent(lines[start]);
+      const items = [];
+      let ordered = false;
+      let i = start;
+      while (i < lines.length) {
+        const line = lines[i];
+        if (mdBlank(line)) {
+          const following = lines[i + 1];
+          if (following !== undefined && MD_ITEM.test(following) && mdIndent(following) > base) { i += 1; continue; }
+          break;
+        }
+        const match = MD_ITEM.exec(line);
+        if (match === null) {
+          if (items.length > 0 && mdIndent(line) > base) {
+            items[items.length - 1].text += ' ' + line.trim();
+            i += 1;
+            continue;
+          }
+          break;
+        }
+        const indent = match[1].length;
+        if (indent < base) break;
+        if (indent > base) {
+          const nested = mdList(lines, i, path + '-n', counter);
+          if (nested.items.length > 0 && items.length > 0) items[items.length - 1].children = nested.items;
+          i = nested.next;
+          continue;
+        }
+        if (items.length === 0) ordered = /\d/.test(match[2]);
+        items.push({ text: match[3], children: [] });
+        i += 1;
+      }
+      const renderItems = (list, listPath) => list.map((item, index) => {
+        const key = listPath + '-' + index;
+        const nestedKey = key + '-c';
+        return h(
+          'li',
+          { key, className: 'kt-md-li' },
+          mdInline(item.text, key + '-t'),
+          item.children.length > 0
+            ? h(
+                ordered ? 'ol' : 'ul',
+                { key: nestedKey, className: 'kt-md-list kt-md-list-sub' },
+                renderItems(item.children, nestedKey),
+              )
+            : null,
+        );
+      });
+      const tag = ordered ? 'ol' : 'ul';
+      return {
+        items,
+        next: i,
+        node: h(tag, { key: path + '-list-' + counter.n++, className: 'kt-md-list' }, renderItems(items, path)),
+      };
+    }
+
+    function renderMarkdown(source, keyPrefix) {
+      const text = typeof source === 'string' ? source.replace(/\r\n?/g, '\n') : '';
+      const lines = text.split('\n');
+      const prefix = keyPrefix || 'md';
+      const counter = { n: 0 };
+      const blocks = [];
+      let i = 0;
+      while (i < lines.length) {
+        const line = lines[i];
+        if (mdBlank(line)) { i += 1; continue; }
+        const fence = MD_FENCE.exec(line);
+        if (fence !== null) {
+          const lang = fence[1].trim();
+          i += 1;
+          const code = [];
+          while (i < lines.length && !/^\s{0,3}```\s*$/.test(lines[i])) { code.push(lines[i]); i += 1; }
+          i += 1;
+          blocks.push(
+            h(
+              'pre',
+              { key: prefix + '-pre-' + counter.n++, className: 'kt-md-pre' },
+              h('code', { className: 'kt-md-codeblock', 'data-lang': lang === '' ? undefined : lang }, code.join('\n')),
+            ),
+          );
+          continue;
+        }
+        const heading = MD_HEADING.exec(line);
+        if (heading !== null) {
+          const level = Math.min(6, heading[1].length);
+          blocks.push(
+            h(
+              'h' + level,
+              { key: prefix + '-h-' + counter.n++, className: 'kt-md-h kt-md-h' + level },
+              mdInline(heading[2].replace(/\s+#+\s*$/, ''), prefix + '-h-' + counter.n),
+            ),
+          );
+          i += 1;
+          continue;
+        }
+        if (MD_HR.test(line)) {
+          blocks.push(h('hr', { key: prefix + '-hr-' + counter.n++, className: 'kt-md-hr' }));
+          i += 1;
+          continue;
+        }
+        if (MD_QUOTE.test(line)) {
+          const quoted = [];
+          while (i < lines.length && MD_QUOTE.test(lines[i])) {
+            quoted.push(lines[i].replace(MD_QUOTE, ''));
+            i += 1;
+          }
+          blocks.push(h('blockquote', { key: prefix + '-q-' + counter.n++, className: 'kt-md-quote' }, mdInline(quoted.join(' '), prefix + '-q-' + counter.n)));
+          continue;
+        }
+        if (MD_ITEM.test(line)) {
+          const parsed = mdList(lines, i, prefix + '-l-' + counter.n, counter);
+          blocks.push(parsed.node);
+          i = parsed.next;
+          continue;
+        }
+        const paragraph = [];
+        while (i < lines.length && !mdBlank(lines[i]) && !MD_STARTS.test(lines[i])) {
+          paragraph.push(lines[i].replace(/\s+$/, ''));
+          i += 1;
+        }
+        if (paragraph.length === 0) { i += 1; continue; }
+        blocks.push(
+          h('p', { key: prefix + '-p-' + counter.n++, className: 'kt-md-p' }, mdInline(paragraph.join(' '), prefix + '-p-' + counter.n)),
+        );
+      }
+      return blocks;
+    }
+
+    function Markdown(props) {
+      const { text, className } = props;
+      return h(
+        'div',
+        { className: 'kt-md' + (className === undefined || className === '' ? '' : ' ' + className) },
+        renderMarkdown(text, 'md'),
+      );
+    }
+
+    function DetailDrawer(props) {
+      const { card, index, t, onClose, onEdit } = props;
+      const [zoom, setZoom] = React.useState(false);
+      const parents = index.parentsOf.get(card.id) || [];
+      const primary = parents.find((link) => link.primary);
+      const parentCard = primary === undefined ? null : index.byId.get(primary.parentId) || null;
+      const kids = index.primaryChildrenOf.get(card.id) || [];
+      const related = parents.filter((link) => !link.primary);
+
+      React.useEffect(() => {
+        function onKey(event) {
+          if (event.key === 'Escape') {
+            event.preventDefault();
+            onClose();
+          }
+        }
+        document.addEventListener('keydown', onKey);
+        return () => document.removeEventListener('keydown', onKey);
+      }, [onClose]);
+
+      return h(
+        'div',
+        {
+          className: 'kt-drawer-overlay',
+          onMouseDown: (event) => {
+            if (event.target === event.currentTarget) onClose();
+          },
+        },
+        h(
+          'aside',
+          { className: 'kt-drawer', role: 'dialog', 'aria-modal': 'true', 'aria-label': t('drawer.title') },
+          h(
+            'header',
+            { className: 'kt-drawer-head' },
+            h(
+              'div',
+              { className: 'kt-drawer-titles' },
+              h('h2', { className: 'kt-drawer-title' }, card.title),
+              h(
+                'p',
+                { className: 'kt-drawer-meta' },
+                parentCard === null ? t('cl.affilTop') : t('cl.affilParent', { name: parentCard.title }),
+                kids.length > 0 ? ' · ' + t('drawer.kids', { count: kids.length }) : '',
+                related.length > 0 ? ' · ' + t('drawer.refs', { count: related.length }) : '',
+              ),
+            ),
+            h(
+              'button',
+              { type: 'button', className: 'kt-text-btn', onClick: onEdit },
+              t('ed.edit'),
+            ),
+            h(
+              'button',
+              {
+                type: 'button',
+                className: 'kt-icon-btn',
+                title: t('drawer.close'),
+                'aria-label': t('drawer.close'),
+                onClick: onClose,
+              },
+              h(Icon, { name: 'close', size: 13 }),
+            ),
+          ),
+          h(
+            'div',
+            { className: 'kt-drawer-scroll' },
+            card.image !== null && card.image !== undefined
+              ? h('img', {
+                  className: 'kt-drawer-img',
+                  src: card.image.data,
+                  alt: card.title,
+                  onClick: () => setZoom(true),
+                })
+              : null,
+            card.content === ''
+              ? h('p', { className: 'kt-content-placeholder' }, t('card.noContent'))
+              : h(Markdown, { text: card.content, className: 'kt-md-drawer' }),
+          ),
+        ),
+        zoom && card.image ? h(Lightbox, { image: card.image, title: card.title, t, onClose: () => setZoom(false) }) : null,
+      );
+    }
+
     function ImagePanel(props) {
       const { card, store, t, showNotice, compact } = props;
       const inputRef = React.useRef(null);
@@ -3838,7 +4197,7 @@ function createWorkspaceComponents(React) {
     /* ------------------------------------------------------------------ */
 
     function BrainstormStage(props) {
-      const { store, state, t, showNotice } = props;
+      const { store, state, t, showNotice, openDetail, openEditor } = props;
       const [title, setTitle] = React.useState('');
       const [content, setContent] = React.useState('');
       const titleRef = React.useRef(null);
@@ -3846,6 +4205,7 @@ function createWorkspaceComponents(React) {
       const expanded = new Set(state.ui.expanded);
       const [promptOpen, setPromptOpen] = React.useState(false);
       const [deleteTarget, setDeleteTarget] = React.useState(null);
+      const [editingContent, setEditingContent] = React.useState(null);
       const defaultPrompts = [];
       for (let index = 0; index < PROMPT_COUNT; index += 1) {
         defaultPrompts.push(t('bs.prompt.' + index));
@@ -3947,15 +4307,66 @@ function createWorkspaceComponents(React) {
                     if (event.key === 'Escape') store.toggleExpand(card.id);
                   },
                 }),
-                h('textarea', {
-                  className: 'kt-textarea',
-                  defaultValue: card.content,
-                  placeholder: t('bs.placeholderContent'),
-                  maxLength: MAX_CONTENT,
-                  'aria-label': t('tr.content'),
-                  onBlur: (event) => store.updateCard(card.id, { content: event.target.value }),
-                }),
+                editingContent === card.id
+                  ? h('textarea', {
+                      className: 'kt-textarea',
+                      defaultValue: card.content,
+                      placeholder: t('bs.placeholderContent'),
+                      maxLength: MAX_CONTENT,
+                      autoFocus: true,
+                      'aria-label': t('tr.content'),
+                      onBlur: (event) => {
+                        store.updateCard(card.id, { content: event.target.value });
+                        setEditingContent(null);
+                      },
+                      onKeyDown: (event) => {
+                        if (event.key === 'Escape') setEditingContent(null);
+                        if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+                          event.currentTarget.blur();
+                        }
+                      },
+                    })
+                  : card.content === ''
+                    ? h('p', { className: 'kt-card-content kt-content-placeholder' }, t('card.noContent'))
+                    : h(Markdown, { text: card.content, className: 'kt-md-card' }),
                 h(ImagePanel, { card, store, t, showNotice, compact: true }),
+                h(
+                  'div',
+                  { className: 'kt-card-actions-row' },
+                  editingContent === card.id
+                    ? h('span', { className: 'kt-hint-inline' }, t('md.editHint'))
+                    : h(
+                        'button',
+                        {
+                          type: 'button',
+                          className: 'kt-text-btn',
+                          onClick: () => setEditingContent(card.id),
+                        },
+                        card.content === '' ? t('md.write') : t('md.edit'),
+                      ),
+                  editingContent === card.id
+                    ? null
+                    : h(
+                        'button',
+                        {
+                          type: 'button',
+                          className: 'kt-text-btn',
+                          onClick: () => openEditor(card.id),
+                        },
+                        t('ed.expand'),
+                      ),
+                  editingContent === card.id || (card.content === '' && card.image === null)
+                    ? null
+                    : h(
+                        'button',
+                        {
+                          type: 'button',
+                          className: 'kt-text-btn',
+                          onClick: () => openDetail(card.id),
+                        },
+                        t('md.detail'),
+                      ),
+                ),
               )
             : null,
         );
@@ -4194,7 +4605,7 @@ function createWorkspaceComponents(React) {
                 { className: 'kt-bcard-content' },
                 card.content === ''
                   ? h('span', { className: 'kt-content-placeholder' }, t('card.noContent'))
-                  : card.content,
+                  : h(Markdown, { text: card.content, className: 'kt-md-card' }),
               ),
               h(ImagePanel, { card, store: api.store, t, showNotice: api.showNotice, compact: true }),
               h(
@@ -4231,6 +4642,32 @@ function createWorkspaceComponents(React) {
                     className: 'kt-text-btn',
                     onClick: (event) => {
                       event.stopPropagation();
+                      api.openEditor(card.id);
+                    },
+                  },
+                  t('ed.expand'),
+                ),
+                card.content === '' && card.image === null
+                  ? null
+                  : h(
+                      'button',
+                      {
+                        type: 'button',
+                        className: 'kt-text-btn',
+                        onClick: (event) => {
+                          event.stopPropagation();
+                          api.openDetail(card.id);
+                        },
+                      },
+                      t('md.detail'),
+                    ),
+                h(
+                  'button',
+                  {
+                    type: 'button',
+                    className: 'kt-text-btn',
+                    onClick: (event) => {
+                      event.stopPropagation();
                       api.setRoot(card.id);
                     },
                   },
@@ -4255,7 +4692,7 @@ function createWorkspaceComponents(React) {
     }
 
     function ClassifyStage(props) {
-      const { store, state, t, showNotice } = props;
+      const { store, state, t, showNotice, openDetail, openEditor } = props;
       const index = indexData(state);
       const expanded = new Set(state.ui.expanded);
       const board = computeBoard(index, state.cards, expanded);
@@ -4389,6 +4826,8 @@ function createWorkspaceComponents(React) {
         overId,
         setOverId,
         showNotice,
+        openDetail,
+        openEditor,
         fileOverId,
         setFileOver: setFileOverId,
         beginDrag,
@@ -4701,6 +5140,8 @@ function createWorkspaceComponents(React) {
         trail,
         depth,
         showNotice,
+        openDetail,
+        openEditor,
         requestDelete,
         confirmId,
         confirmDelete,
@@ -4873,6 +5314,22 @@ function createWorkspaceComponents(React) {
             { type: 'button', className: 'kt-mini-btn', title: t('tr.edit'), 'aria-label': t('tr.edit'), onClick: () => setEditingTitle(true) },
             h(Icon, { name: 'edit', size: 12 }),
           ),
+          card.content === '' && card.image === null
+            ? null
+            : h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'kt-mini-btn',
+                  title: t('md.detail'),
+                  'aria-label': t('md.detail'),
+                  onClick: (event) => {
+                    event.stopPropagation();
+                    openDetail(card.id);
+                  },
+                },
+                h(Icon, { name: 'note', size: 12 }),
+              ),
           confirmId === card.id
             ? h(InlineConfirm, {
                 t,
@@ -4958,11 +5415,15 @@ function createWorkspaceComponents(React) {
                     : null,
                   card.content === ''
                     ? h('p', { className: 'kt-content-text kt-content-placeholder' }, t('card.noContent'))
-                    : h('p', { className: 'kt-content-text' }, card.content),
+                    : h(Markdown, { text: card.content, className: 'kt-md-card' }),
                   h(
                     'div',
                     { className: 'kt-inline-actions' },
                     h('button', { type: 'button', className: 'kt-text-btn', onClick: () => setEditingContent(true) }, t('tr.editContent')),
+                    h('button', { type: 'button', className: 'kt-text-btn', onClick: () => openEditor(card.id) }, t('ed.expand')),
+                    card.content === '' && card.image === null
+                      ? null
+                      : h('button', { type: 'button', className: 'kt-text-btn', onClick: () => openDetail(card.id) }, t('md.detail')),
                   ),
                 ),
           ),
@@ -5012,6 +5473,8 @@ function createWorkspaceComponents(React) {
               depth: depth + 1,
               trail: new Set(trail).add(card.id),
               showNotice,
+              openDetail,
+              openEditor,
               requestDelete,
               confirmId,
               confirmDelete,
@@ -5041,8 +5504,163 @@ function createWorkspaceComponents(React) {
       );
     }
 
+    function ExpandedEditor(props) {
+      const { card, t, onSave, onClose } = props;
+      const [title, setTitle] = React.useState(card.title);
+      const [content, setContent] = React.useState(card.content);
+      const [tab, setTab] = React.useState('edit');
+      const [confirming, setConfirming] = React.useState(false);
+      const areaRef = React.useRef(null);
+      const dirty = title !== card.title || content !== card.content;
+
+      const save = React.useCallback(() => {
+        const clean = title.trim();
+        if (clean === '') return;
+        onSave({ title: clean, content });
+        onClose();
+      }, [title, content, onSave, onClose]);
+
+      React.useEffect(() => {
+        if (areaRef.current !== null) areaRef.current.focus();
+      }, []);
+
+      React.useEffect(() => {
+        function onKey(event) {
+          if (event.key === 'Escape') {
+            event.preventDefault();
+            if (confirming) setConfirming(false);
+            else if (dirty) setConfirming(true);
+            else onClose();
+          } else if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+            event.preventDefault();
+            save();
+          }
+        }
+        document.addEventListener('keydown', onKey);
+        return () => document.removeEventListener('keydown', onKey);
+      }, [confirming, dirty, onClose, save]);
+
+      function requestClose() {
+        if (dirty) setConfirming(true);
+        else onClose();
+      }
+
+      return h(
+        'div',
+        {
+          className: 'kt-editor-overlay',
+          onMouseDown: (event) => {
+            if (event.target === event.currentTarget) requestClose();
+          },
+        },
+        h(
+          'section',
+          { className: 'kt-editor', role: 'dialog', 'aria-modal': 'true', 'aria-label': t('ed.title') },
+          h(
+            'header',
+            { className: 'kt-editor-head' },
+            h('input', {
+              className: 'kt-input',
+              value: title,
+              maxLength: MAX_TITLE,
+              placeholder: t('ed.titleLabel'),
+              'aria-label': t('ed.titleLabel'),
+              onChange: (event) => setTitle(event.target.value),
+            }),
+            h(
+              'button',
+              {
+                type: 'button',
+                className: 'kt-icon-btn',
+                title: t('ed.close'),
+                'aria-label': t('ed.close'),
+                onClick: requestClose,
+              },
+              h(Icon, { name: 'close', size: 13 }),
+            ),
+          ),
+          h(
+            'div',
+            { className: 'kt-editor-tabs' },
+            h(
+              'div',
+              { className: 'kt-seg', role: 'tablist' },
+              h(
+                'button',
+                {
+                  type: 'button',
+                  role: 'tab',
+                  'aria-selected': tab === 'edit',
+                  className: 'kt-seg-btn' + (tab === 'edit' ? ' kt-seg-btn-active' : ''),
+                  onClick: () => setTab('edit'),
+                },
+                t('ed.tabEdit'),
+              ),
+              h(
+                'button',
+                {
+                  type: 'button',
+                  role: 'tab',
+                  'aria-selected': tab === 'preview',
+                  className: 'kt-seg-btn' + (tab === 'preview' ? ' kt-seg-btn-active' : ''),
+                  onClick: () => setTab('preview'),
+                },
+                t('ed.tabPreview'),
+              ),
+            ),
+            h('span', { className: 'kt-editor-count' }, String(content.length) + ' / ' + MAX_CONTENT),
+          ),
+          h(
+            'div',
+            { className: 'kt-editor-body' },
+            tab === 'edit'
+              ? h('textarea', {
+                  ref: areaRef,
+                  className: 'kt-editor-area',
+                  value: content,
+                  maxLength: MAX_CONTENT,
+                  placeholder: t('ed.contentLabel'),
+                  'aria-label': t('ed.contentLabel'),
+                  onChange: (event) => setContent(event.target.value),
+                })
+              : h(
+                  'div',
+                  { className: 'kt-editor-preview' },
+                  content === ''
+                    ? h('span', { className: 'kt-content-placeholder' }, t('card.noContent'))
+                    : h(Markdown, { text: content, className: 'kt-md-drawer' }),
+                ),
+          ),
+          h(
+            'footer',
+            { className: 'kt-editor-foot' },
+            confirming
+              ? h(
+                  React.Fragment,
+                  null,
+                  h('span', { className: 'kt-editor-warn' }, t('ed.discard')),
+                  h('button', { type: 'button', className: 'kt-text-btn', onClick: () => setConfirming(false) }, t('ed.keep')),
+                  h('button', { type: 'button', className: 'kt-btn kt-btn-brand', onClick: onClose }, t('ed.discardYes')),
+                )
+              : h(
+                  React.Fragment,
+                  null,
+                  h('span', { className: 'kt-editor-hint' }, t('ed.hint')),
+                  h('span', { className: 'kt-editor-spacer' }),
+                  h('button', { type: 'button', className: 'kt-btn', onClick: requestClose }, t('btn.cancel')),
+                  h(
+                    'button',
+                    { type: 'button', className: 'kt-btn kt-btn-primary', disabled: title.trim() === '', onClick: save },
+                    t('btn.save'),
+                  ),
+                ),
+          ),
+        ),
+      );
+    }
+
     function TreeGraph(props) {
-      const { index, collapsed, t, onToggle } = props;
+      const { index, collapsed, t, onToggle, openDetail, openEditor } = props;
       const [selected, setSelected] = React.useState(null);
       const [zoom, setZoom] = React.useState(false);
 
@@ -5292,7 +5910,25 @@ function createWorkspaceComponents(React) {
                 { className: 'kt-graph-detail-body' },
                 selectedCard.content === ''
                   ? h('span', { className: 'kt-content-placeholder' }, t('card.noContent'))
-                  : selectedCard.content,
+                  : h(Markdown, { text: selectedCard.content, className: 'kt-md-card' }),
+              ),
+              h(
+                'div',
+                { className: 'kt-graph-detail-actions' },
+                h(
+                  'button',
+                  { type: 'button', className: 'kt-text-btn', onClick: () => openEditor(selectedCard.id) },
+                  t('ed.expand'),
+                ),
+                h(
+                  'button',
+                  {
+                    type: 'button',
+                    className: 'kt-text-btn',
+                    onClick: () => openDetail(selectedCard.id),
+                  },
+                  t('md.detail'),
+                ),
               ),
               h('p', { className: 'kt-graph-detail-hint' }, t('graph.readonly')),
             ),
@@ -5308,7 +5944,7 @@ function createWorkspaceComponents(React) {
     }
 
     function TreeStage(props) {
-      const { store, state, t, showNotice } = props;
+      const { store, state, t, showNotice, openDetail, openEditor } = props;
       const index = indexData(state);
       const collapsed = new Set(state.ui.collapsed);
       const expanded = new Set(state.ui.expanded);
@@ -5490,7 +6126,7 @@ function createWorkspaceComponents(React) {
 
       const view =
         state.ui.view === 'graph'
-          ? h(TreeGraph, { index, collapsed, expanded, t, onToggle: (id) => store.toggleCollapse(id) })
+          ? h(TreeGraph, { index, collapsed, expanded, t, openDetail, openEditor, onToggle: (id) => store.toggleCollapse(id) })
           : roots.length === 0
             ? h('p', { className: 'kt-empty' }, t('tr.empty'))
             : h(
@@ -5509,6 +6145,8 @@ function createWorkspaceComponents(React) {
                     depth: 0,
                     trail: new Set(),
                     showNotice,
+                    openDetail,
+                    openEditor,
                     requestDelete: requestDeleteFromRow,
                     confirmId,
                     confirmDelete: confirmDeleteFromRow,
@@ -5643,8 +6281,14 @@ function createWorkspaceComponents(React) {
       const state = useStoreState(store);
       useLocaleRevision(locale);
       const [helpOpen, setHelpOpen] = React.useState(false);
+      const [detailId, setDetailId] = React.useState(null);
+      const [editorId, setEditorId] = React.useState(null);
       const [notice, showNotice] = useTransientNotice();
       const fileRef = React.useRef(null);
+      const openDetail = React.useCallback((id) => setDetailId(id), []);
+      const openEditor = React.useCallback((id) => setEditorId(id), []);
+      const detailCard = detailId === null ? null : state.cards.find((card) => card.id === detailId) || null;
+      const editorCard = editorId === null ? null : state.cards.find((card) => card.id === editorId) || null;
 
       React.useEffect(() => {
         function onPaste(event) {
@@ -5788,11 +6432,11 @@ function createWorkspaceComponents(React) {
 
       let body = null;
       if (state.stage === 'brainstorm') {
-        body = h(BrainstormStage, { store, state, t, showNotice });
+        body = h(BrainstormStage, { store, state, t, showNotice, openDetail, openEditor });
       } else if (state.stage === 'classify') {
-        body = h(ClassifyStage, { store, state, t, showNotice });
+        body = h(ClassifyStage, { store, state, t, showNotice, openDetail, openEditor });
       } else {
-        body = h(TreeStage, { store, state, t, showNotice });
+        body = h(TreeStage, { store, state, t, showNotice, openDetail, openEditor });
       }
 
       return h(
@@ -5849,6 +6493,25 @@ function createWorkspaceComponents(React) {
             ? h('div', { className: 'kt-notice kt-notice-' + notice.kind, role: 'status' }, notice.text)
             : null,
           helpOpen ? h(HelpDialog, { t, onClose: () => setHelpOpen(false) }) : null,
+          detailCard === null
+            ? null
+            : h(DetailDrawer, {
+                key: 'detail-' + detailCard.id,
+                card: detailCard,
+                index,
+                t,
+                onEdit: () => openEditor(detailCard.id),
+                onClose: () => setDetailId(null),
+              }),
+          editorCard === null
+            ? null
+            : h(ExpandedEditor, {
+                key: 'editor-' + editorCard.id,
+                card: editorCard,
+                t,
+                onSave: (patch) => store.updateCard(editorCard.id, patch),
+                onClose: () => setEditorId(null),
+              }),
           h('input', {
             key: 'file',
             ref: fileRef,

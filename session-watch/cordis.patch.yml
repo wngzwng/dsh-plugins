@@ -1,0 +1,3 @@
+- insert:
+    - id: session-watch
+      name: '@local/session-watch'

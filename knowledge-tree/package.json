@@ -1,6 +1,6 @@
 {
   "name": "@local/knowledge-tree",
-  "version": "2.1.0",
+  "version": "2.3.0",
   "scripts": {
     "build": "node build-client.mjs",
     "test": "node --test ../tests/knowledge*.test.js ../tests/library.test.js ../tests/workspace-ui.test.js ../tests/git-sync.test.js tests/github-sync.test.js"
